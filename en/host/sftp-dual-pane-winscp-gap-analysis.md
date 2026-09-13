@@ -72,7 +72,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | Move/copy, remote → remote | ⚠️ Requires typing an absolute path | No directory picker and no drag-and-drop move |
 | chmod | ⚠️ Single file only | Has a 9-cell rwx matrix with octal synchronization, but **no batch operation, recursive application, or setuid/sticky bits** |
 | **chown, change owner/group** | ❌ None | `ISftpService` has no interface; Owner/Group in the properties dialog are read-only |
-| **Create/identify symbolic links** | ❌ None | `RemoteFileInfo` has no symbolic-link field. The first character of the permission string is only `d`/`-`, so links are treated as regular files |
+| Create/identify symbolic links | ✅ Implemented (2026-09-12) | Link rows have dedicated icons and a "→ target" tooltip, the permission string starts with `l`, and links to directories can be opened directly; the context menu has "New Symbolic Link". Deleting removes only the link itself, copying produces a link (`cp -P`), and folder downloads do not descend into nested directory links. On FTP, links can be created only on servers that support `SITE SYMLINK`; plugin protocols cannot create them |
 | **Modify remote timestamps** | ❌ None | Timestamps are preserved only during download; uploads do not write back mtime |
 | Local file attributes/permissions | ❌ None | The local pane has only 5 context-menu items |
 
@@ -178,7 +178,7 @@ Ordered purely by return on investment, for reference:
 10. **Directory comparison + synchronization** (C1), which determines "whether it can replace WinSCP"
 11. Remote recursive search (C2)
 12. Terminal integration (C3)
-13. chown / symbolic links / timestamp modification
+13. chown / timestamp modification (symbolic links were completed on 2026-09-12)
 14. Post-transfer verification
 
 ---

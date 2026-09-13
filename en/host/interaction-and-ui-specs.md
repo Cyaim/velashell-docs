@@ -245,7 +245,11 @@ Moved from the terminal toolbar to the far right of the menu bar as **quick acce
   - Double-click folder = enter; double-click file = download and open with the default application, or preview.
   - Drag a local file here = **upload** (triggers the file transfer component in §9); drag a list item locally = **download**.
   - **Name conflicts**: when an upload/download encounters an existing file with the same name, use the setting in §14 File Transfer “When a file already exists”: ask (confirmation dialog: overwrite or skip) / overwrite / skip / rename (`file (1).txt`).
-  - Right-click = file context menu (download, upload, rename, delete, chmod permissions, copy path, new).
+  - Right-click = file context menu (download, upload, rename, delete, chmod permissions, copy path, new). “New” includes **New Symbolic Link**: first ask for the link target path (prefilled with the row’s path when right-clicking a row), then ask for the link name (prefilled with the last segment of the target). The target is written verbatim; relative paths resolve against the link’s directory (`ln -s` semantics). On FTP, only servers that support `SITE SYMLINK` can create links; plugin protocols report that the operation is not supported.
+  - **Symbolic links**: the icon is `folder-symlink` (points to a directory, amber, double-click to enter) or `file-symlink` (points to a file, or the link is broken); hovering the name shows “→ target”; the Type column reads “Symbolic Link”; the permission string starts with `l`; the properties dialog adds a “Link Target” row.
+    - **Delete** removes only the link itself and never touches the target; recursive deletes also remove nested links as links.
+    - **Copy** (remote → remote) produces a link (`cp -P`).
+    - **Downloading a folder** does not descend into nested directory links (`rsync -r` semantics, avoiding links to `/` or back to an ancestor); an explicitly selected link is still followed, and links to files download the file content.
   - Selected state `bg-hover`; multi-select (Ctrl/Shift) for batch operations.
   - Navigation uses “load first, commit later”: on failure, retain the original path, list, selection, and scroll position; after entering a new directory, clear the selection and return to the top.
   - Refreshing the current directory preserves selected items that still exist and the scroll position. Do not rebuild the list when content has not changed. For concurrent navigation, accept only the latest request result.
