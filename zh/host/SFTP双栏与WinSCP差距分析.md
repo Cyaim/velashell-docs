@@ -201,4 +201,26 @@ SFTP 文档目前是纯双栏（`SftpDocumentView.axaml` 无终端控件）。
   在本应用的 Dracula 面 `#282A36` 上标点等于隐形。现按命名颜色整体重着色为
   Dracula（暗）/ Alucard（亮），未收录的角色做对比度兜底。
 
-**已知限制**：编辑器打开后再切换主题，配色不会实时更新（重新打开即可）。
+~~**已知限制**：编辑器打开后再切换主题，配色不会实时更新（重新打开即可）。~~ —— 2026-09-12 已解决，见下。
+
+### 2026-09-12 更新：配色跟随具名主题、链接改色、语言扩充、窗口加大
+
+- **配色从当前界面主题派生**：原先只有 Dracula / Alucard 两套，Nord、Gruvbox、GitHub Light 等主题下
+  编辑器底色跟着主题走、代码却仍是 Dracula 配色。现在语法色取当前主题的种子色
+  （字符串 = Yellow、关键字 = Magenta、数字 = Accent、函数 = Success、类型 = Info、注释 = TextTertiary），
+  VelaDark 下与原先的 Dracula 配色一致，VelaLight 下除变量色（改为橙与红的中点，避免与字符串撞色）外与 Alucard 一致；
+  每个角色对编辑器底色不足 3:1 时自动向正文色靠拢。
+- **网址 / 邮箱链接改色**：AvaloniaEdit 缺省链接色是纯蓝 `#0000FF`，在 Dracula 底上约 1.7:1、几乎读不出来。
+  改用信息色令牌 `VelaInfo`（Dracula 青 `#8BE9FD`、Alucard 深青蓝 `#036A96`，其余主题各取自己的 Info），
+  全部主题对编辑器底色均 ≥ 3:1（有回归用例逐主题量）。
+- **内置定义的颜色名全部归类**：CSS 选择器、HTML 标签、Markdown 链接、Patch 增删行等原先没有角色、
+  顶着浅色配色的名字已全部映射；回归用例逐个核对内置与自带定义里的每一个颜色名。
+- **新增自带语法**：nginx、TOML、Makefile、Go、Rust、Lua、Ruby、Perl、通用 SQL（MySQL / PostgreSQL / SQLite，
+  替代原先只认 SQL Server 方言的 TSQL）、HCL / Terraform；另补一批扩展名映射
+  （`.tsx`/`.jsx`、`.scss`/`.less`、`.axaml`/`.resx`、`.jsonl`、systemd 的 `.timer`/`.socket` 等）。
+- **按目录认 nginx**：判定改用远端完整路径，`/etc/nginx/conf.d/*.conf`、`sites-available/` 下的文件按 nginx 着色，
+  其余目录的 `.conf` 仍按 INI。
+- **主题实时切换**：编辑器打开期间切换主题会立即重新着色（订阅 `IThemeService.EffectiveThemeChanged`）。
+- **默认窗口加大**：928×648 → 1160×820；小屏或高缩放下打开时按屏幕工作区收缩并居中。
+- **已知限制**：AvaloniaEdit 12 内置的 TeX 定义自身损坏（加载即报 "Could not find main RuleSet"），
+  `.tex` 暂不映射、按纯文本打开。
