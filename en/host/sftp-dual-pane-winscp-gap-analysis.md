@@ -132,16 +132,18 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 ## IV. Category C: Architectural Gaps
 
 These three capabilities **have no provision at the interface layer** (`ISftpService.cs` is 82 lines in full and has no related signatures), so they require dedicated design.
+(C1 was completed on 2026-09-12; see section VII.)
 
-### C1. Synchronization and Directory Comparison (**the most fundamental gap versus WinSCP**)
+### C1. Synchronization and Directory Comparison —— ✅ Implemented (2026-09-12)
 
-VelaShell has **zero lines of code** for WinSCP's three major synchronization capabilities:
+WinSCP's three major synchronization capabilities are now available for SFTP, FTP, and FTPS dual-pane documents; the rules are in [section VII](#vii-appendix-directory-comparison-and-synchronization-2026-09-12):
 
-- **Directory comparison**: show side-by-side which items exist only on the left, only on the right, differ, or match
-- **Synchronization, one-way / two-way / mirror**: preview differences → confirm → execute in batch
+- **Directory comparison**: "Compare Directories" on the dual-pane document toolbar selects the differing items in each pane (current level only, the same scope as WinSCP's command of that name)
+- **Synchronization, one-way / two-way / mirror / timestamps only**: scan → preview (each step can be unchecked) → confirm deletions → execute in batch → automatic re-check
 - **Keep remote directory up to date**: watch local changes and upload them automatically
 
-This is the **only reason many people choose WinSCP**. Implementing it requires a comparison result model, difference calculation based on size + mtime with optional checksum, a preview UI, and an execution engine that reuses the existing transfer pipeline.
+~~Original assessment: zero lines of code; needs a comparison result model, difference calculation, a preview UI, and an execution engine.~~
+By default differences are computed **by SHA-256 first** (digests computed on the server), falling back to size + modification time when that is unsupported or fails (see 7.4).
 
 ### C2. Search Capability
 
@@ -175,7 +177,7 @@ Ordered purely by return on investment, for reference:
 9. Drop onto a target-folder row
 
 **Third tier, high cost and differentiation**
-10. **Directory comparison + synchronization** (C1), which determines "whether it can replace WinSCP"
+10. ~~**Directory comparison + synchronization** (C1), which determines "whether it can replace WinSCP"~~ — completed on 2026-09-12 (SHA-256-first comparison added on 09-13)
 11. Remote recursive search (C2)
 12. Terminal integration (C3)
 13. chown / timestamp modification (symbolic links were completed on 2026-09-12)
@@ -204,3 +206,65 @@ The built-in editor (`RemoteFileEditorView`) originally had **no syntax highligh
 - **Live theme switching**: switching themes while the editor is open recolors it immediately (via `IThemeService.EffectiveThemeChanged`).
 - **Larger default window**: 928×648 → 1160×820; on small screens or high scaling it shrinks to the screen working area and re-centers when opened.
 - **Known limitation**: AvaloniaEdit 12's built-in TeX definition is itself broken (it throws "Could not find main RuleSet" on load), so `.tex` is not mapped for now and opens as plain text.
+
+---
+
+## VII. Appendix: Directory Comparison and Synchronization (2026-09-12)
+
+Applies to SFTP, FTP, and FTPS dual-pane documents (plugin-protocol file documents work too, with the limits in 7.5). The entry points are on the toolbar at the top of the dual-pane document; the file browser in the terminal sidebar has no local pane and does not offer them.
+
+### 7.1 Compare Directories (non-recursive)
+
+- Compares the level of the **directories the two panes are currently showing**, using the criteria last chosen in the sync window (modification time + file size by default).
+- The local pane selects items that exist only locally or are newer locally; the remote pane selects items that exist only remotely or are newer remotely. Items with the same time but a different size, and conflicts, are selected in both panes.
+- The right side of the toolbar shows a one-line verdict ("Local: N different · Remote: N different · N identical"), cleared as soon as either pane changes directory.
+- When the remote pane hides dotfiles, local dotfiles are left out of the comparison too, so every `.git` and `.env` is not flagged as "local only".
+
+### 7.2 The Synchronize window
+
+| Option | Values | Notes |
+| --- | --- | --- |
+| Direction | Local → Remote / Remote → Local / Both | In Both, the mode is fixed to "Synchronize files" and nothing is ever deleted |
+| Mode | Synchronize files / Mirror files / Synchronize timestamps | **Synchronize**: transfer new, newer, and different-size files; never overwrite a newer target. **Mirror**: overwrite whenever different, even if the target is newer. **Timestamps**: transfer nothing; for files present on both sides with the same size but different times, set the target's time to the source's |
+| Compare by | SHA-256 checksum (checked by default), modification time, file size | None checked = only fill in what is missing; SHA-256 rules are in 7.4 |
+| Delete files | One-way only | Delete items that exist only on the target side; a directory is deleted as a whole and the items below it are not listed separately; confirmed before running |
+| Existing files only | — | Only update files present on both sides; create nothing |
+| File mask | WinSCP syntax `include \| exclude` | Masks separated by `;`; a trailing `/` makes a directory mask; a mask containing `/` matches the relative path; `*` and `?` are case-insensitive; `*.*` equals `*`. Excluded directories are **not scanned**, so they are never deleted |
+
+Flow: **Compare** (both sides scanned in parallel; the status bar shows how many directories have been scanned; cancellable) → **Preview** (one row per step: action, path, size and time on each side; each row can be unchecked; changing any option discards the preview) → **Synchronize** → **automatic re-check** (the verdict states "no differences remain" or "N operations still pending").
+
+Execution rules:
+
+- Order: create directories → set times → transfer files → delete. **Deletions are not performed after a cancellation.**
+- Transfers use the same pipeline as ordinary uploads and downloads (transfer panel, global concurrency limit, transfer log), but **bypass the "When a file already exists" conflict policy and skip resume detection** — the preview is the confirmation, and a target smaller than its source is the normal case of "different content", not a partial file to resume.
+- After a transfer the modification time is **always** written back, regardless of the "Preserve timestamps" setting: uploads set the remote time with SFTP setstat / FTP `MFMT`, downloads set the local time. Without this, the next comparison would see a just-uploaded file as "newer on the remote". The window reports servers that cannot do it.
+- Local paths built from remote names are validated segment by segment: names that are invalid on Windows (such as `a:b` or `CON`) are reported and skipped instead of being written somewhere else.
+- Parent directories are created level by level by the executor, so unchecking a "create folder" row while keeping the files inside it still works.
+
+### 7.3 Keep remote directory up to date
+
+- Always Local → Remote, using the window's file mask, criteria, and "Delete files" (confirmed first if checked).
+- Performs one full synchronization at start; then watches the local directory tree and, after a 1-second debounce, re-compares **only the directory level where the change happened**. Newly appearing directories (an extracted archive, a `git clone`) are compared as a whole tree, and a watcher buffer overflow (lost events) triggers a full re-check.
+- The list area turns into an activity log (newest first) recording each upload and deletion. Closing the window or the document stops watching.
+
+### 7.4 Comparison rules
+
+- **SHA-256 first** (added 2026-09-13): files present on both sides **with the same size** are compared by content digest first (a different size already proves the content differs, so nothing is read).
+  - Equal digests = the same file, **not transferred even if the times differ** (no more mass re-uploads after `git checkout`, extracting an archive, or `touch`). Different digests = the content really changed; the modification time decides which side is newer, and if the times are equal too the pair is "content differs" (transferred one-way, left alone in two-way).
+  - Remote digests are **computed on the server**, without transferring content: SFTP runs `sha256sum` (or `shasum -a 256`) over the SSH exec channel, up to 200 paths per call; FTP / FTPS use `HASH` (SHA-256) or `XSHA256`. The remote side goes first, so no local byte is read when the server cannot hash.
+  - **Fallback**: if the server cannot hash at all or fails (SFTP-only accounts with exec disabled, neither tool installed, Windows hosts, FTP servers without those commands, plugin protocols), the whole run compares by size and modification time and the window notes why; if a single file cannot be read, only that file falls back and the note says "M of N". With only SHA-256 checked (no time or size), the fallback uses both.
+  - Also applies in timestamps mode: files whose digests differ are never re-stamped, so the difference is not hidden.
+  - Digests are cached by "path + size + modification time" until the window / document closes, so the automatic re-check after a sync only re-hashes the files just transferred (which doubles as post-transfer verification).
+  - "Compare Directories" also compares by SHA-256 first, and appends a hint to its verdict when it had to fall back.
+- **Time precision**: both sides are truncated to the coarser precision before comparing. SFTP has seconds; FTP's Unix LIST only has minutes (and only a date for files older than six months), inferred from the raw value. Tolerance is 1 second (absorbs FAT/exFAT's 2-second granularity).
+- **Case**: on Windows / macOS paths are paired case-insensitively; two remote names that differ only in case are marked as a conflict and left alone.
+- **Type conflicts**: a file on one side and a directory on the other is a conflict, and nothing below it is compared (otherwise "Delete files" would remove a tree nobody meant to touch).
+- **Links**: neither side descends into links to directories (the number skipped is reported; same rule as folder downloads). Remote links to files are treated as files. Locally only real symbolic links and junctions are skipped; OneDrive "Files On-Demand" placeholders take part as usual.
+
+### 7.5 Not done / known limitations
+
+- **Cost of SHA-256**: same-size files are read in full on both sides (the local disk and the server's disk), so the first comparison of a large tree is noticeably slower; uncheck it when not needed. The cache does not outlive the window: a file whose content changed while its size and modification time did not (a deliberate `touch -r`) reuses the old digest on a second comparison in the same window.
+- Sync options are remembered only within the same document tab, not saved to settings, and reset after a restart.
+- **FTP time zones**: LIST times are given in the server's local time and interpreted in the client's time zone. When the server and the client are in different zones, time comparisons are shifted as a whole — compare by file size only in that case. WinSCP offers a "time zone offset" in its session settings; VelaShell does not yet.
+- FTP servers without `MFMT`, and plugin protocols, cannot align the remote time after an upload. One-way Local → Remote is unaffected (a newer remote file is not treated as something to upload), but **two-way sync would download the just-uploaded files back**; the window warns about this.
+- "Keep up to date" is Local → Remote only (as in WinSCP).
