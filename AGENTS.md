@@ -79,3 +79,7 @@ zh/            en/
 宿主的 [`DESIGN.md`](https://github.com/joesdu/VelaShell/blob/main/DESIGN.md)(被 XAML 注释与
 单元测试按章节号引用)与 [`plan.md`](https://github.com/joesdu/VelaShell/blob/main/plan.md)(进展记录),
 以及 velashell-markets 的 `docs/`(**尚未并入,待迁移**)。
+
+### 提交约束
+
+- **所有提交信息与 PR 描述都不要附加 Claude Code 等 AI 工具的作者信息** —— 不加 `Co-Authored-By: Claude …` 行,也不加 `🤖 Generated with Claude Code` 之类的署名。VelaShellLabs 下所有仓库一致适用。
