@@ -19,7 +19,7 @@ zh/                    en/                    内容
   templates/             templates/           插件开发指南、打包与发布、发版流程
 ```
 
-中英两棵树同构:中文是原文,英文是翻译。**当前有 7 篇只有中文版**:
+中英两棵树同构:中文是原文,英文是翻译。**当前有 8 篇只有中文版**:
 
 | 只有中文版 | 位置 |
 | --- | --- |
@@ -27,6 +27,7 @@ zh/                    en/                    内容
 | S3 协议插件化设计 | [`zh/host/S3协议插件化设计.md`](zh/host/S3协议插件化设计.md) |
 | S3 完整支持实施报告 | [`zh/host/S3协议完整支持-实施报告-2026-08.md`](zh/host/S3协议完整支持-实施报告-2026-08.md) |
 | 系统密钥链与 sudo 凭据填充可行性调研 | [`zh/host/系统密钥链与sudo凭据填充可行性调研.md`](zh/host/系统密钥链与sudo凭据填充可行性调研.md) |
+| 凭据管理器集成设计 | [`zh/host/凭据管理器集成设计.md`](zh/host/凭据管理器集成设计.md) |
 | 三份发版流程 `release-process.md` | [`zh/sdk/`](zh/sdk/release-process.md) · [`zh/cli/`](zh/cli/release-process.md) · [`zh/templates/`](zh/templates/release-process.md) |
 
 ## 快速入口
