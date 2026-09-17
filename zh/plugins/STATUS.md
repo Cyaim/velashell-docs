@@ -341,3 +341,97 @@ Avalonia 这类第三方库。
 (收据是 `LegacyAdopted`、不伪造包摘要)、旁装目录内容变了重记基线而不标红、目录被外部删掉后
 收据被清掉且同一个 id 能重新装回来;原有的"管理页装的插件被改动即拒装载""被改动的插件撤回页签"
 两条保持通过(`TestCategory=Plugins` 共 127 条全绿)。
+
+## 2026-09-17:冷启动的瓶颈是 Defender,不是 JIT —— 并回答 R2R 那一节的「尚未验证」
+
+上面 [2026-08-23(三)](#2026-08-23三readytorun-开启附实测) 留了一条:主程序自身的冷启动
+**没有实测**,并推断「主程序受益应当明显大于 PluginHost」。现在量了,**推断是错的**。
+
+宿主侧的 `StartupTrace` 攒下 37 次真实启动样本(`~/.velashell/logs`),是干净的两态分布:
+全热 `FirstFrame` 0.96–1.28 s,全冷 6.07–7.63 s。关键线索是每一段都在按同一比例放大 ——
+连 `BuildServiceProvider` 这种纯内存操作都从 75 ms 涨到 1,875 ms,而纯内存操作不会因为
+「冷」而变慢。
+
+在 NVMe + i7-13700、Defender 实时防护开启的机器上,对 win-x64 自包含发行目录
+(227 MB / 317 文件)拆开量:
+
+| 测量 | 结果 |
+| --- | ---: |
+| robocopy 整目录复制 | 188 ms |
+| 复制到新路径后首次全量读(Defender 扫描缓存必然未命中) | **3,934 ms** |
+| 同一批文件再读一遍 | 87 ms |
+
+按 Authenticode 签名状态拆,**体积几乎相同而代价差 4.4 倍**:
+
+| 签名状态 | 文件数 | 体积 | 首次扫描 | ms/文件 | ms/MB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| NotSigned | 94 | 113 MB | 3,153 ms | 33.5 | 27.9 |
+| Valid(微软签的运行时) | 207 | 109 MB | 712 ms | 3.4 | 6.5 |
+
+`ms/文件` 差 10 倍说明大头是**每文件的信誉查询**而非按字节扫描:
+`plugins/velashell-ai/ExCSS.dll` 只有 0.33 MB,首次装载却花了 312 ms。
+
+### 对 R2R 结论的修正
+
+R2R 省的是 JIT —— CPU 时间,冷热两态一样多,碰不到上面这 6 秒;而它把未签名程序集的体积
+几乎翻倍(`VelaShell.dll` 2.9 MB IL → 8.4 MB 代码段),等于直接加钱买扫描时间。
+省下的 JIT ≈ 多出来的扫描,**在 Windows 上净收益接近零**。
+
+2026-08-23 那次 PluginHost 的实测(−32 ms,尾部抖动收敛)没有问题,它量的是热态 JIT;
+错在把它外推成「主程序冷启动也会同比例受益」。
+
+`PublishReadyToRun` 因此改成可开关,新增 `VelaShellReadyToRun` 属性(默认 `true`,行为不变):
+
+```bash
+dotnet publish src/VelaShell -c Release -r win-x64 -p:VelaShellReadyToRun=false
+```
+
+⚠️ 一个容易搞错的地方:Defender 是在**程序集被装载时**扫它,不是启动时把整个目录扫一遍。
+所以启动路径上根本不装载的程序集(`BouncyCastle` 只在首次 SSH 握手时用),它们的 R2R 膨胀
+**不花冷启动的钱** —— `PublishReadyToRunExclude` 只能省包体和首次连接的 JIT,换不来首帧。
+因此**没有**给出凭直觉猜的排除清单。
+
+「启动路径上那 ~55 MB 的 R2R 值不值」有一个不需要重新构建的判决性实验(同一份二进制,
+扫描成本恒定,差值即纯 JIT),两次都在热态下跑:
+
+```powershell
+$env:VELASHELL_STARTUP_TRACE='1'; VelaShell.exe   # 基线
+$env:DOTNET_ReadyToRun='0';       VelaShell.exe   # 忽略 R2R 本机代码,全部 JIT
+```
+
+差值少于「R2R 多出来的字节 × 27.9 ms/MB」(当前约 20 MB → ~560 ms),R2R 就是净亏。
+Linux/macOS 不受这笔账影响(没有 Defender 那一层),真要关也应当只关 Windows 这一支。
+
+### 插件启动激活挪到首帧之后
+
+`App.OnFrameworkInitializationCompleted` 里的 `Task.Run(() => pluginManager.StartAsync())`
+原注释写着「启动路径零阻塞」—— 线程上确实零阻塞,但 Defender 的过滤驱动是**排队**的:
+随包分发的 AI 插件 48 个未签名文件 / 33.7 MB,首次装载实测 ~1,973 ms 的扫描(比整个 .NET
+运行时的 264 文件 / 193 MB 还贵,因为运行时走微软签名的快速路径)。`velashell.ai` 的清单
+声明了 `onStartup`,于是这 48 个文件正好和首帧要的 Avalonia/Skia 程序集挤在同一条队里 ——
+打点上 `WindowOpened → FirstFrame` 冷启动 1,165 ms、热启动只要 391 ms。
+
+新增 `FirstFrameSignal`(`VelaShell.Infrastructure/Diagnostics/`):`MainWindow` 在首帧回调里
+`Signal()`,`App` 那条后台链 `WaitAsync(10 s)` 之后再 `StartAsync()`。一个字节都没少读,
+只是不再和首帧抢那条队。超时是保险丝 —— 窗口没开起来(headless 测试、设计器)时照常启动插件。
+
+这与 `PrewarmLazyPlugins` 的 `PrewarmDelay`(见上文第 4 条)是同一个诉求,但后者用的是拍脑袋
+的 5 秒定时;现在有了真正的首帧信号。`PrewarmDelay` 从 `StartAsync` 起算,因此自动顺延。
+
+**代价**:插件贡献的命令、协议与工作区晚约一帧出现。它们本来就异步登记(`StartAsync` 一直是
+fire-and-forget),真正受影响的边角是冷启动瞬间到达的插件协议链接(如 `redis://`),
+此前也已经是竞态,现在窗口更宽。
+
+### 对 G9 的影响
+
+蓝图 01 的 G9(「主程序冷启动不因已安装 N 个插件显著劣化」)需要按这个机制重新理解:
+插件对冷启动的成本**不是激活逻辑,而是它那堆未签名 dll 过 Defender 的时间**,
+约 33.5 ms/文件 + 27.9 ms/MB。因此「插件默认惰性」仍然正确,但还要加一条:
+**插件作者应当尽量少文件、少体积**,而 `onStartup` 的插件要为它的全部依赖付首帧的钱
+—— 这也是本次把启动激活挪到首帧之后的原因。
+
+### 尚未验证
+
+- 真实冷启动上的收益数字:本机无法可靠地把页缓存与 Defender 扫描缓存一起清空,必须重启后实测。
+- 上面那条 `DOTNET_ReadyToRun=0` 的 A/B 尚未跑,R2R 的去留因此**还没有结论**,默认保持开启。
+- Linux/macOS 侧没有对应测量(那两个平台没有 Defender 这一层,预期结论完全不同)。

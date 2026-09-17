@@ -403,3 +403,109 @@ digest), a side-loaded directory that changed on disk is re-baselined instead of
 directory deleted outside the host has its receipt dropped so the same id installs again. The
 existing "modified manager-installed plugin is refused" and "a modified plugin withdraws its tabs"
 tests still pass (127 green under `TestCategory=Plugins`).
+
+## 2026-09-17: the cold-start bottleneck is Defender, not JIT — answering the "not yet verified" note under ReadyToRun
+
+The [2026-08-23 (3)](#2026-08-23-3-readytorun-enabled-with-measurements) entry left one item open:
+the host's own cold start had **never been measured**, and it guessed that "the main program should
+benefit noticeably more than PluginHost". It has now been measured, and **the guess was wrong**.
+
+The host's `StartupTrace` had accumulated 37 real launches (`~/.velashell/logs`), a clean bimodal
+distribution: fully warm `FirstFrame` 0.96–1.28 s, fully cold 6.07–7.63 s. The telling detail is
+that *every* segment scales by the same factor — even `BuildServiceProvider`, a pure in-memory
+operation, goes from 75 ms to 1,875 ms. In-memory work does not get slower because a machine is
+"cold"; only the first load of the assembly it lives in does.
+
+Measured on NVMe + i7-13700 with Defender real-time protection on, against the win-x64
+self-contained publish directory (227 MB / 317 files):
+
+| Measurement | Result |
+| --- | ---: |
+| robocopy the whole directory | 188 ms |
+| First full read after copying to a new path (Defender's scan cache necessarily misses) | **3,934 ms** |
+| Reading the same files again | 87 ms |
+
+Split by Authenticode status — near-identical byte volume, **4.4× the cost**:
+
+| Signature | Files | Size | First scan | ms/file | ms/MB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| NotSigned | 94 | 113 MB | 3,153 ms | 33.5 | 27.9 |
+| Valid (the Microsoft-signed runtime) | 207 | 109 MB | 712 ms | 3.4 | 6.5 |
+
+The 10× gap in ms/file shows the dominant cost is the **per-file reputation lookup**, not
+byte-rate scanning: `plugins/velashell-ai/ExCSS.dll` is only 0.33 MB yet took 312 ms to first load.
+
+### Correction to the ReadyToRun conclusion
+
+R2R saves JIT — CPU time, identical whether the machine is cold or warm, so it cannot touch those
+6 seconds. Meanwhile it roughly doubles the size of unsigned assemblies (`VelaShell.dll`: 2.9 MB of
+IL → 8.4 MB of code), which is buying scan time with cash. JIT saved ≈ scan time added:
+**net gain on Windows is close to zero**.
+
+The 2026-08-23 PluginHost measurement (−32 ms, tighter tail) was not wrong; it measured warm-start
+JIT. What was wrong was extrapolating it to "the main program's cold start benefits proportionally".
+
+`PublishReadyToRun` is therefore switchable now, via a new `VelaShellReadyToRun` property
+(default `true`, behavior unchanged):
+
+```bash
+dotnet publish src/VelaShell -c Release -r win-x64 -p:VelaShellReadyToRun=false
+```
+
+⚠️ An easy thing to get wrong: Defender scans an assembly **when it is loaded**, not by sweeping the
+whole directory at startup. So assemblies never loaded on the startup path (`BouncyCastle` is only
+touched at the first SSH handshake) pay **nothing** for their R2R bloat at cold start —
+`PublishReadyToRunExclude` would buy package size and first-connect JIT, not first frame. No
+guessed-at exclude list has therefore been added.
+
+Whether the ~55 MB of R2R *on* the startup path is worth it has a decisive experiment that needs no
+rebuild (same binaries, so scan cost is held constant and the delta is pure JIT). Run both warm:
+
+```powershell
+$env:VELASHELL_STARTUP_TRACE='1'; VelaShell.exe   # baseline
+$env:DOTNET_ReadyToRun='0';       VelaShell.exe   # ignore R2R native code, JIT everything
+```
+
+If the delta is smaller than "extra R2R bytes × 27.9 ms/MB" (currently ~20 MB → ~560 ms), R2R is a
+net loss. Linux/macOS are unaffected by this accounting (no Defender layer); if R2R is ever turned
+off it should be turned off for Windows only.
+
+### Plugin startup activation moved behind the first frame
+
+`App.OnFrameworkInitializationCompleted` ran `Task.Run(() => pluginManager.StartAsync())` under a
+comment claiming "zero blocking on the startup path". That is true of threads, but Defender's
+filter driver **serializes**: the bundled AI plugin is 48 unsigned files / 33.7 MB and measured
+~1,973 ms of first-load scanning — more expensive than the entire .NET runtime's 264 files / 193 MB,
+which takes the Microsoft-signed fast path. `velashell.ai` declares `onStartup`, so those 48 files
+queued up behind the very Avalonia/Skia assemblies the first frame was waiting for. The trace shows
+it: `WindowOpened → FirstFrame` is 1,165 ms cold versus 391 ms warm.
+
+New `FirstFrameSignal` (`VelaShell.Infrastructure/Diagnostics/`): `MainWindow` calls `Signal()` in
+its first-frame callback, and App's background chain awaits `WaitAsync(10 s)` before `StartAsync()`.
+Not one byte less is read — it simply no longer competes with the first frame. The timeout is a
+fuse: when no window comes up (headless tests, the designer) plugins start anyway.
+
+This is the same concern as `PrewarmLazyPlugins`' `PrewarmDelay` (item 4 above), which used a
+hand-picked 5-second timer; there is now a real first-frame signal. `PrewarmDelay` counts from
+`StartAsync`, so it shifts along automatically.
+
+**The cost**: plugin-contributed commands, protocols and workspaces appear roughly one frame later.
+They were always registered asynchronously (`StartAsync` has always been fire-and-forget); the real
+edge case is a plugin protocol link (e.g. `redis://`) arriving in the instant of a cold start, which
+was already a race and now has a wider window.
+
+### Impact on G9
+
+G9 in blueprint 01 ("host cold start does not degrade noticeably with N plugins installed") needs to
+be read through this mechanism: a plugin's cold-start cost is **not its activation logic but the time
+its unsigned DLLs spend in Defender** — roughly 33.5 ms/file + 27.9 ms/MB. "Plugins are lazy by
+default" remains correct, with one addition: **plugin authors should ship few files and few bytes**,
+and an `onStartup` plugin pays for all of its dependencies out of the first frame — which is why
+startup activation now waits for that frame.
+
+### Not yet verified
+
+- The actual cold-start gain: this machine cannot reliably drop the page cache and Defender's scan
+  cache together, so it has to be measured after a reboot.
+- The `DOTNET_ReadyToRun=0` A/B above has not been run, so R2R's fate is **undecided**; it stays on.
+- No equivalent measurement on Linux/macOS (no Defender layer there; expect a different conclusion).
