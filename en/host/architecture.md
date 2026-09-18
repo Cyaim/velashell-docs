@@ -161,6 +161,28 @@ flowchart TD
   original `ci.Host` and are unaffected.**
 - **An incomplete proxy configuration raises and refuses the connection — never a silent direct
   connect.**
+- **The four modes decide one thing only: how the first outbound TCP hop is made**, covering
+  **every outbound channel** (SSH / SFTP / FTP control and data, updates, Gist, feeds, plugin HTTP).
+  Inbound tunnels (`-L` / `-R` / `-D`) are a separate layer — do not fold them into these four options.
+
+| Mode | Layer | Covers | Notes |
+| --- | --- | --- | --- |
+| **none** | direct | — | **Truly direct**: never consults the system proxy, never reads `HTTP_PROXY` / `ALL_PROXY` |
+| **system** | OS settings (**a resolver, not a protocol**) | every outbound channel | Resolves the OS proxy into http or socks5; if the OS says SOCKS, use SOCKS5 — never force HTTP CONNECT; unresolvable (not set / bypassed / PAC failure) falls back to direct |
+| **http** | application layer (L7) | HTTP / HTTPS plus raw TCP tunnelled with `CONNECT` | No UDP; FTP must be passive, with the data connection on the same CONNECT |
+| **socks5** | session / transport layer | TCP (this product does not implement UDP ASSOCIATE) | Does not parse application content; the first choice for proxying SSH / FTP |
+
+- **A system-proxy change needs no restart**: the source is live (on Windows it registers for
+  Internet Settings change notifications) and is re-read before every connection. Long-lived
+  connections are not switched mid-flight; new sessions pick up the new value.
+- The Settings → Proxy page **lays these four modes out as a table** below the form (mode names
+  aligned in one column, descriptions wrapping, using the same wording as the dropdown) — one
+  wording for docs and UI, so users need not come here.
+- **DNS**: over HTTP CONNECT / SOCKS5 the hostname is **resolved by the proxy by default**
+  (`ProxyDns` defaults on, i.e. socks5h semantics) so a locally resolved polluted/intranet IP is
+  never handed to the proxy; only `none` resolves locally.
+- **The proxy applies to the first hop only**: on a jump chain only the innermost host makes a real
+  TCP connection; later hops ride the established SSH channel and never re-wrap the same proxy.
 - ICMP and the raw TCP used by connection diagnostics **deliberately bypass the proxy**: the
   protocol does not support it, and diagnostics mean *test the direct path*.
 - ⚠️ Do not confuse this with **dynamic SOCKS forwarding** (`-D`) — that is a tunnel feature and
