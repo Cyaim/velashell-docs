@@ -275,7 +275,7 @@ The whole disposal path **does not throw**: it usually runs while cleaning up af
 | Unknown message number | Reply `SSH_MSG_UNIMPLEMENTED` (carrying the sequence number that triggered it), **do not disconnect** |
 | Peer closes the connection mid-frame | `ClosedByPeer`. **Not** `ProtocolError` —— distinguishing the two matters for the upper layer's reconnect decision |
 | Peer closes cleanly (EOF on a frame boundary) | `ClosedByPeer` |
-| Decompression fails (over the §6 limit, or a corrupt zlib stream) | Disconnect, `ProtocolError`; the reported cause MUST be the decompression failure itself (§6) |
+| Decompression fails (over the §6 limit, a corrupt zlib stream, or an end-of-stream marker) | Disconnect, `ProtocolError`; the reported cause MUST be the decompression failure itself (§6) |
 
 〔Decision〕**EOF in the middle of a frame is an error, but the error must say "the peer closed mid-packet".**
 The framing layer cannot quietly return "end of stream" the way it does for EOF on a frame boundary —— that would silently swallow a truncated packet,
@@ -309,6 +309,11 @@ Receive: decrypt/verify → strip padding → payload → decompress → message
   when key exchange is run directly, bypassing the connection factory, a negotiated result other than these two still fails on the spot with a key-exchange error.
 - **After every key re-exchange, the compression context MUST be reset**.
   The symptom of not resetting it is that the peer fails to decompress after rekeying —— by which time it is no longer recognizable as a compression problem.
+- **The compressed stream never ends** (RFC 4253 §6.2: the context is passed from one packet to the next, with only a partial flush at the end of each packet).
+  Every packet we send ends with a sync flush (the peer's inflate decodes it; like a partial flush it does not end the stream); we never write an end-of-stream marker.
+  〔Decision〕**A zlib end-of-stream marker (the final block) in the peer's payload disconnects on that packet**, reported as `ProtocolError` (decompression failure);
+  the packet is not handed to the upper layer. OpenSSH's decompression treats the end of the stream as fatal too.
+  Previously: the packet carrying the marker was accepted, and the decoder then refused every byte of the following packets —— the error surfaced one frame late as an unexplained "decompression failed".
 
 The compressed `payload` length is still subject to the limit of §1.1;
 **the decompressed length MUST also be capped**, otherwise a small packet could decompress into arbitrarily large memory —— i.e. a zip bomb.

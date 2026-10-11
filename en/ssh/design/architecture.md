@@ -2670,6 +2670,21 @@ write again; if the library's version does not fit, fix the library".
   number; encoding, decoding and the default path come from this library, and a file `TryDecode` cannot fully read is not rewritten. This library
   never touches the file — locking and atomic replacement are the caller's job.
 
+### 11.2.28 Four fixes: the zlib end-of-stream marker, writing stdin after close, HMAC `Verify`, interop coverage of rekeying (2026-10-10)
+
+Background: a review of a few edge behaviors and of the new .NET 11 APIs turned up the four items below. As usual, the specs changed first and the implementation followed.
+
+| Problem | Decision |
+| --- | --- |
+| A zlib end-of-stream marker in the peer's payload: that packet was accepted and the error surfaced one frame later as an unexplained "decompression failed" | Disconnect on the spot ([`spec/01`](../spec/01-transport-framing.md) §6). Checked against the .NET 11 RC1 decoder: at the marker it returns `Done` and accepts no further byte |
+| Writing stdin right after a command exited: the first writes returned normally and the data was silently dropped (until the stdin pump finished on the thread pool, the pipe's writer did not know the channel had closed) | The writer handed to the caller first asks whether the channel still takes input; once it does not, writes report completion at once and the channel stream throws at once ([`spec/05`](../spec/05-connection.md) §4.3). Reproduced in 275 of 300 rounds before the fix |
+| Server-initiated rekeying had been run against a real sshd only with the default ed25519 | The interop test runs once each for ed25519 / ecdsa-sha2-nistp256 / rsa-sha2-512 / rsa-sha2-256; the list keeps every algorithm with only the one under test moved first, so the narrowing on rekey starts from the full list |
+| Hashed known_hosts and the `.ppk` MAC were "compute, then compare in fixed time" | Use .NET 11's `HMACSHA1.Verify` / `HMACSHA256.Verify` (internally `FixedTimeEquals`). It throws `ArgumentException` on a hash of the wrong length instead of returning false: known_hosts checks the length first (a bad line simply does not match), and the `.ppk` length is already checked before the passphrase is derived |
+
+On the host side (not in this library): automatic reconnects no longer show the host fingerprint confirmation — anything that would need a person is rejected, and automatic reconnect stops until the user reconnects by hand
+(host [`plan.md`](https://github.com/joesdu/VelaShell/blob/main/plan.md) §193; interaction spec, "Disconnected State" and "Host fingerprint confirmation").
+Nothing changes in this library for it: rekeying never asks the policy, and it pins the key verified in the first exchange ([`spec/03`](../spec/03-key-exchange.md) §8.4).
+
 ### 11.3 Switch-over strategy with VelaShell
 
 1. VelaShell's `ISshClientWrapper` / `ISftpClientWrapper` / `IShellStreamWrapper`

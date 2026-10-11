@@ -521,7 +521,7 @@ Opened from the multi-select in §3 (exactly two connections): one file tab with
 When a session disconnects, dim the terminal canvas and center a disconnection notice (red status + “Connection disconnected” + “Reconnect” button + reason/time). The corresponding tab dot turns red, the status bar connection icon turns red, and the host dot in the sidebar turns red. Support an automatic reconnect toggle with exponential backoff.
 
 **Automatic reconnect only rescues disconnects nobody asked for** — dropped links, timeouts, a server that
-died. The four cases below never reconnect on their own; the notice still shows, and coming back is the
+died. The five cases below never reconnect on their own; the notice still shows, and coming back is the
 user’s call via “Reconnect” (the same principle as “a tunnel the user stopped by hand is never restarted”):
 
 - The user clicked “Disconnect” in the toolbar.
@@ -530,6 +530,10 @@ user’s call via “Reconnect” (the same principle as “a tunnel the user st
 - A local terminal’s shell exited.
 - The very first connection never succeeded — authentication failures above all, where retrying just throws
   the same wrong password at the server a few more times.
+- A reconnect failed on the host fingerprint: the user rejected it in the confirmation dialog, “Block and alert on
+  fingerprint change” stopped it, or an automatic reconnect hit a fingerprint that needs confirming (see “Host
+  fingerprint confirmation”: automatic reconnects never show that dialog). Retrying gives the same answer every time;
+  the dialog comes up when the user clicks “Reconnect”, and once that connects, automatic reconnect works as usual again.
 
 ### Connecting State
 
@@ -660,6 +664,7 @@ for work the host cannot see.
   - Local and dynamic forwards run a **local port-occupancy precheck** before binding, reporting “local port 27017 is already in use by another program” instead of a low-level socket error.
   - A tunnel does **not** follow the lifecycle of a terminal tab: creating or starting one while disconnected opens a background connection dedicated to tunnels, and that connection is dropped once the server's last tunnel is removed.
   - When the host session drops, its tunnels are marked stopped; those with “reconnect automatically after a dropout” are redialed and rebuilt on their own (failures back off from 10s to 5min), and the rest wait for a one-click start. **A tunnel the user stopped by hand is never brought back up automatically.**
+    Automatic redials never show the host fingerprint confirmation (same as terminal tabs, see “Host fingerprint confirmation”); a server whose redial failed on the fingerprint is not redialed again and does not enter the backoff — an error toast says so, and its tunnels wait for the user to start one by hand (that start asks), after which automatic reconnect works as usual.
   - **Running state is never persisted**: only the tunnel configuration is saved, so after a restart every tunnel is stopped and waits for a manual start. Only tunnels with “Set up automatically when VelaShell starts” are connected and set up in the background at launch (without holding up startup; a missing credential still brings up the login prompt). A failure during that automatic setup (the server is unreachable, the local port is taken, the credential prompt was cancelled) raises an error toast in the bottom-right corner naming the server and the tunnel; one server failing does not stop the others, one tunnel failing does not stop the rest on the same server, and if none came up the background connection opened for them is dropped again.
   - Type descriptions: local forwarding (`-L`), remote forwarding (`-R`), dynamic SOCKS (`-D`).
 
@@ -1121,6 +1126,11 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
   - A jump host whose credential cannot be resolved does **not** prompt (the dialog asks for the target's credentials); the
     connection ends with a “Jump host X: reason” error.
 - **Host fingerprint confirmation**: on the first connection to an unknown host, or when a recorded fingerprint changes, show a “Host Trust” confirmation (fingerprint + Accept and Save/Trust once/Reject; a change also shows the recorded fingerprint from known_hosts alongside), linked to §15 Host Trust Center. A change raises this dialog by default rather than being refused outright (#476); strict fail-closed behaviour is the “Block and alert on fingerprint change” switch on the Security Audit page.
+  **Automatic reconnects never show this dialog** (a terminal tab's countdown reconnect, the batch reconnect after waking from sleep, a tunnel's automatic redial): usually nobody is at the screen,
+  and the dialog would either pile up unattended modal windows and leave the reconnect hanging, or get clicked away without a look — both defeat the point of having someone check the fingerprint.
+  Whatever would have asked is rejected instead; the disconnect notice says that automatic reconnect stopped and to reconnect by hand to check the fingerprint, and a security alert is still recorded
+  (audit log: “rejected a host fingerprint”); every hop of a jump chain behaves the same. The two defaults that never ask are unchanged: with “confirm on first connection” off an unseen host is still
+  recorded on first use (TOFU), and with “block on change” on a change is still blocked. The login dialog for missing credentials and the one-time-code dialog are not affected and still appear.
   **Each key type of a host is recorded separately** (servers often have RSA, ECDSA and Ed25519 keys at once): a key matching any recorded one is accepted; accepting a key of a new type **adds a record** instead of overwriting the existing one,
   so whichever type is negotiated later is recognised; only a different key of the same type replaces it. The change dialog shows the recorded fingerprint of the same type, or the most recently seen one when that type was never recorded.
   When connecting, the recorded types go to the front of the host key algorithm list, so a normal server negotiates the type already recorded.

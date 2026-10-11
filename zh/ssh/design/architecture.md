@@ -2604,6 +2604,21 @@ X11 见 §11.2.23；终端尺寸见 §11.2.16（行列为 0 合法，照 RFC 425
 - **宿主那一份只留「怎样安全地改写」**：xauth 约定的锁、临时文件 + 原子替换、按主机名与显示号挑记录；编解码与默认路径都用本库的，
   `TryDecode` 认不全的文件不改写。本库不碰文件 —— 上锁与原子替换由调用方负责。
 
+### 11.2.28 四处修补：zlib 流结束标记、关闭后写 stdin、HMAC 的 `Verify`、重协商的互操作覆盖（2026-10-10）
+
+起因：复查本库的几处边界行为与 .NET 11 的新 API 用法时找出下面四处。照规矩先改规格、再实现。
+
+| 问题 | 决定 |
+| --- | --- |
+| 对端在载荷里写了 zlib 的流结束标记：那个报文照常收下，错到下一帧才报一句看不出缘由的「解压失败」 | 当场断开（[`spec/01`](../spec/01-transport-framing.md) §6）。拿 .NET 11 RC1 的解码器实测过：结束标记处它返回 `Done`，之后一个字节都不再收 |
+| 命令退出后马上写 stdin：头几次写照常返回、数据被悄悄丢掉（stdin 泵在线程池上收尾之前，管道的 writer 不知道通道关了） | 交给调用方的 writer 先问通道还收不收，不收了当场报完成、通道流当场抛（[`spec/05`](../spec/05-connection.md) §4.3）。修之前 300 轮里 275 轮复现 |
+| 服务端发起的重协商只对真 sshd 跑过默认谈成的 ed25519 | 互操作用例按 ed25519 / ecdsa-sha2-nistp256 / rsa-sha2-512 / rsa-sha2-256 各跑一遍；清单保留全部算法、只把要测的排到最前，重协商时的收窄是从完整清单里收 |
+| hashed known_hosts 与 `.ppk` 的 MAC 是「算出来再定长比较」 | 改用 .NET 11 的 `HMACSHA1.Verify` / `HMACSHA256.Verify`（内部就是 `FixedTimeEquals`）。它遇到长度不对的散列抛 `ArgumentException` 而不是返回 false：known_hosts 那一处先查长度（坏行当成对不上），`.ppk` 那一处的长度在派生口令之前已经核过 |
+
+宿主那一侧（不在本库）：自动重连不再弹主机指纹确认框 —— 要人裁决的直接拒绝，并停掉自动重连、等用户手动重连
+（宿主 [`plan.md`](https://github.com/joesdu/VelaShell/blob/main/plan.md) §193，交互规格的「断开连接状态」与「主机指纹确认」）。
+本库这边不用跟着改：重协商本来就不问策略，钉住的是首次交换验明的那把钥（[`spec/03`](../spec/03-key-exchange.md) §8.4）。
+
 ### 11.3 与 VelaShell 的切换策略
 
 1. VelaShell 的 `ISshClientWrapper` / `ISftpClientWrapper` / `IShellStreamWrapper`
