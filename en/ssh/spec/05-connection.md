@@ -311,6 +311,15 @@ The library used to complete this writer while tearing down: the next write got 
 and teardown often runs on the receive loop, while the caller may be writing on another thread, which means touching someone else's `PipeWriter` across threads. Now the stdin pump's side does the teardown (it completes the reader).
 Once CLOSE has been queued, the frame in the pump's hands is no longer sent and is not counted as "sent" — otherwise the channel stream's `FlushAsync` would report success for data that was dropped.
 
+〔Decision〕**"Closed" starts the moment the channel stops taking stdin, and writes report it at once.** Once the local side starts closing, a `CLOSE` in either direction has been queued,
+or the channel has been torn down (including a lost connection), `WriteAsync` / `FlushAsync` return `IsCompleted` **immediately** and what was written is no longer handed to the pipe;
+a write on the `AsStream()` stream throws `IOException` immediately. The writer handed to the caller asks the channel whether it still takes input before passing anything to the pipe.
+It used to hand out the pipe's own writer, which reports completion only after its reader completes — and the reader belongs to the stdin pump, which exits on the thread pool after the channel is torn down.
+The caller had already seen the close (`WaitAsync` returned, the `Closed` token fired), yet the next few writes returned normally and the data went into the local pipe to be silently dropped
+(writing stdin right after a command exited: 275 of 300 rounds on a dev machine). Nothing extra ever went on the wire — that frame was stopped when it was queued (§1 rule 4).
+Between "still takes input" and the pump sending the data the channel can still close, and that data is lost — just like writing into a socket that has just dropped; that is not what this rule removes.
+What it removes is "the caller already knows it is closed, yet the write still reports success".
+
 Rationale: completing the writer is the idiomatic way for a `PipeWriter` to say "I'm done writing". If it were not treated as EOF, the caller would write, complete the writer,
 and a remote program waiting to read all of its input (`cat`, `sort`, `tar x`) would wait forever —— with no visible error on the caller's side.
 
