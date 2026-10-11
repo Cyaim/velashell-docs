@@ -2685,6 +2685,26 @@ On the host side (not in this library): automatic reconnects no longer show the 
 (host [`plan.md`](https://github.com/joesdu/VelaShell/blob/main/plan.md) §193; interaction spec, "Disconnected State" and "Host fingerprint confirmation").
 Nothing changes in this library for it: rekeying never asks the policy, and it pins the key verified in the first exchange ([`spec/03`](../spec/03-key-exchange.md) §8.4).
 
+### 11.2.29 A read or write still in flight at disposal: buffers are returned only after it exits (2026-10-11)
+
+Background: on the host's CI, a handshake test occasionally failed on macOS —— the server KEXINIT the client read was truncated (only 9 bytes of payload left when it reached the third algorithm list).
+The trail led to disposing the transport: completing the read side returned its 64 KB read buffer to the shared memory pool while another task was still inside a read —— the underlying stream's read held that memory and wrote into it as soon as data arrived.
+In the preceding test the client had rejected the host key and the test's cleanup did not wait for the server side, so the server was disposed while still waiting for NEWKEYS; the next test's transport rented the same array, and its packet got corrupted.
+Walking through that sequence in a standalone program reproduces it deterministically: after disposal, renting an array of the same size on the same thread returns exactly that one, and the pending read then writes its data into it.
+
+It is not limited to tests: when connection disposal finds the send and receive loops still running at the deadline, it disposes the transport first and then waits once more ([`spec/05`](../spec/05-connection.md) §4.4;
+on Windows, ProxyCommand's anonymous pipes ignore cancellation, §11.2.19) —— at that moment reads and writes are stuck in the underlying stream.
+
+| Problem | Decision |
+| --- | --- |
+| Disposal completed the read and write sides on the spot, returning to the pool buffers still held by in-flight reads and writes: a read wrote the peer's data into an array someone else had rented, a flush sent someone else's data | Whichever side still has a call in flight is completed by that call when it exits; disposal only cancels the pending read or flush and does not wait ([`spec/01`](../spec/01-transport-framing.md) §4, "Disposal"). If the underlying stream neither honours cancellation nor ends once closed, that side is never completed and its buffers go to the garbage collector |
+| The receive cipher suite was disposed (keys zeroed) on the spot at disposal, so the in-flight decryption computed a spurious MAC failure | Cipher suites and compressors follow their side and are disposed by the last call to leave; switching a suite or compressor also counts as a call on that side |
+| A read pending on the in-memory transport when it was disposed: unless the peer wrote or closed, the read never returned (the in-memory stream completed its own pipe reader while the read was pending, which does not wake that read) | Disposal first cancels the pending read, which exits with a "disposed" error |
+
+Verification: four new transport tests, with an underlying stream that hands out its buffer and waits to be released before reading or writing —— after disposal, renting an array of the same size does not return the one held by the in-flight read or flush;
+the receive cipher suite is not disposed before the in-flight read exits; on a stream that honours cancellation the pending read exits with a "disposed" error. All four fail on the implementation before the fix.
+In the host's tests, the handshake helper now closes the client and waits for the server side to finish before rethrowing when the client fails.
+
 ### 11.3 Switch-over strategy with VelaShell
 
 1. VelaShell's `ISshClientWrapper` / `ISftpClientWrapper` / `IShellStreamWrapper`
