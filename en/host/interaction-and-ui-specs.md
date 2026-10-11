@@ -234,7 +234,9 @@ Every X top-level window of the built-in X Server is an Avalonia native window (
   sizes can only be measured once a window is open, so before showing, the frame measured on the most recent decorated window is used as an estimate,
   and the first frame no longer starts at 0 and then jumps. When a monitor layout change moves the root origin (plugging a secondary screen on the left
   or above, a dock, waking from sleep), every window's X coordinates are reported again from its current native position. The work area is handed to the
-  X Server from the system's `Screen.WorkingArea`, so menus, maximized windows and dialogs avoid the taskbar.
+  X Server from the system's `Screen.WorkingArea`, so menus, maximized windows and dialogs avoid the taskbar. While a native window is dragged,
+  the X side's position follows at the pace the program processes it (the next position goes out once the previous move has been handled), so on
+  a slow link the program no longer freezes for a while after the button is released.
 - **Mapping honours the states the client set**: a window that set maximized / full screen before mapping is shown maximized / full screen; one with a
   `WM_HINTS` initial_state of IconicState (`xterm -iconic`) is minimized as soon as it maps and does not take the foreground. These states came from the
   client and are not reported back. Later, when the user maximizes / minimizes, only the states the native window manages (maximized, full screen,
@@ -258,7 +260,8 @@ Every X top-level window of the built-in X Server is an Avalonia native window (
   the window underneath (other platforms have no equivalent, and the area outside the shape still catches the mouse). A window with
   `_NET_WM_WINDOW_OPACITY` below 1 gets a transparent background, so the windows behind it show through. Windows with alpha (ARGB visuals) are
   per-pixel transparent only while "Transparent X windows" is on; while it is off (the default) they are shown opaque, as X does without a
-  compositing manager.
+  compositing manager — except windows whose clients declare their edges not part of the window with an input shape (the shadow margin around
+  GTK 4 drop-downs and popup menus), which are shown with their transparency instead of a black border.
 - **X window titles, taskbar and placement**: titles of windows forwarded over SSH read "user@host:22 — title" ("Show where X windows come
   from", on by default and applied immediately — open windows are retitled on the spot; programs connected locally are not labelled), with the
   source and the title each bidi-isolated (a U+202E in the source cannot reverse the title after it), so windows from several hosts can be told
@@ -288,6 +291,10 @@ Every X top-level window of the built-in X Server is an Avalonia native window (
   desktops; not macOS or Wayland). While a remote video player suspends the screen saver, the local screen saver and display sleep are held off
   too, until it resumes or the X Server stops (Windows only for now). On resize the host waits for programs that declare `_NET_WM_SYNC_REQUEST` to
   finish redrawing before showing them, so dragging an edge does not flicker.
+- **Remote GTK 4 programs render with cairo**: in sessions with X11 forwarding (whichever X server the display goes to), the silent post-connect
+  injection that sets `XMODIFIERS` also sets `GSK_RENDERER=cairo` (an existing value in the remote shell is kept). GTK 4's default GL can only fall
+  back to software rendering on the remote side over SSH and sends the whole window's pixels every frame (29 MB for one button click in
+  `gnome-calculator`, 0.15 MB with cairo). Only programs started from that terminal get it.
 - **One-window mode**: when the "Window mode" setting is one large window / no title bar / fullscreen, the built-in X Server starts in
   one-window mode: at start it opens an "X Desktop :N" window (initially 80% of the primary monitor's work area, centered; without system
   decorations for no title bar, fullscreen right away for fullscreen) holding the whole X screen. Remote programs no longer get a window each —

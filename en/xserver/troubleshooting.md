@@ -13,7 +13,7 @@ Ubuntu desktop install). There are three groups: problems in the **remote enviro
 | --- | --- | --- |
 | The terminal prints `libEGL warning: DRI3 error: Could not get DRI3 device` | Mesa tries DRI3 hardware acceleration first. DRI3 passes file descriptors on the same machine, which is impossible over SSH forwarding | **Harmless**; Mesa falls back to software rendering right away. To hide it, set `LIBGL_ALWAYS_SOFTWARE=1` on the remote side |
 | A GTK4 program takes 25 or 50 seconds to show its window, using almost no CPU meanwhile | The desktop portal (`xdg-desktop-portal`) cannot start, and each of the program's D-Bus calls to it waits for the full 25-second timeout | See [1](#1-slow-start-25-seconds-at-a-time) |
-| The window shows up, but interaction drops frames and is not smooth | GTK4 renders with GL by default; without a GPU on the remote side it falls back to llvmpipe and sends the **whole window's pixels** over SSH for every frame | See [2](#2-sluggish-interaction) |
+| The window shows up, but interaction drops frames and is not smooth | GTK4 renders with GL by default; without a GPU on the remote side it falls back to llvmpipe and sends the **whole window's pixels** over SSH for every frame; GTK4 also makes a dozen-odd synchronous round trips per frame, so the higher the link latency the slower it gets | VelaShell already sets `GSK_RENDERER=cairo` for you in sessions with X11 forwarding (since 2026-10-10; only for programs started from that terminal); for programs started any other way see [2](#2-sluggish-interaction) |
 | After starting a GTK program (seen with `gnome-calculator`) the terminal hangs and no window appears locally until you press Ctrl+C; VelaShell's log shows nothing | The same user is logged in to a Wayland desktop on the remote machine. The SSH session has no `WAYLAND_DISPLAY`, but its `XDG_RUNTIME_DIR` is the desktop's directory, which holds the desktop's `wayland-0`; GTK tries Wayland first and connects to it — the window opens on the remote machine's own screen, bypassing X11 forwarding | See [4](#4-the-window-opens-on-the-remote-machines-own-desktop) |
 
 **Deliberate behaviour of the built-in X Server**
@@ -44,6 +44,8 @@ Ubuntu desktop install). There are three groups: problems in the **remote enviro
 
 | Symptom | Cause | What to do |
 | --- | --- | --- |
+| After dragging an X window (GTK 4 programs especially, such as `gnome-calculator`) the program freezes for a while before it responds again; the higher the link latency, the longer the freeze | Library defect: every intermediate position of a drag sent a set of ConfigureNotify events, GTK spends five synchronous round trips on each set and was still working through them after the button was released — a one-second drag at a 20 ms round trip froze it for 8.9 s | Fixed (2026-10-10): the next position goes out only once the client has handled the previous move; the same drag is done 0.6 s after release ([architecture.md](design/architecture.md) §7 "Moves during a drag are coalesced at the client's pace") |
+| Drop-downs and popup menus of GTK 4 programs have a black border around them (`gnome-calculator`'s mode switcher) | Library policy: GTK 4 popovers draw a transparent shadow margin around themselves with or without a compositing manager, and with "Transparent X windows" off (the default) it was shown opaque, i.e. black | Fixed (2026-10-10): windows whose clients declare their edges not part of the window are shown with their transparency, so the menu has a soft shadow; no need to turn on "Transparent X windows" |
 | After stopping and restarting the X Server from the title bar, the remote side reports `Failed to open display` | Host defect: the connector remembered the server that was running before the stop | Fixed ([architecture.md](design/architecture.md), decision log entry "M3: SSH x11 channels go straight into the server through a connector"); on older versions, reconnect the SSH session |
 | The remote program exited, but its local window stays open | Host defect: the remote EOF was not passed on to the X Server | Fixed (same entry; [SSH spec 07 §7.5.9](../ssh/spec/07-forwarding.md)) |
 | After switching the engine to VcXsrv in the settings, X programs started from SSH sessions that were already open report `Failed to open display` | Host defect: the connector bound when the session opened its shell only knew the built-in engine | Fixed (same entry): once the built-in engine has stopped, x11 channels of existing sessions go over local TCP to whichever X server is running now (since 2026-10-10 only on Windows: other platforms have no VcXsrv, so that loopback port is never our server) |
@@ -106,7 +108,18 @@ changed parts are sent:
 forwarding into the built-in X Server.)
 
 The X Server cannot choose the renderer for the client — Mesa's software EGL works with the core protocol alone — so setting
-`GSK_RENDERER=cairo` is a remote-side setting; the `~/.bashrc` snippet above already includes it.
+`GSK_RENDERER=cairo` is a remote-side setting. Since 2026-10-10 VelaShell sets it for you after connecting in sessions with X11 forwarding (in
+the same silent injection as `XMODIFIERS`; an existing value is kept — to use GL, set it yourself in the remote rc first, e.g.
+`export GSK_RENDERER=ngl`); programs started from the remote desktop's menu, systemd, `ssh host program` and other ways that bypass that
+terminal do not get it and rely on the `~/.bashrc` snippet above. The same click is 0.15 MB with cairo and 29 MB with GL; opening the mode
+drop-down is 3.6 MB versus 11 MB.
+
+With the renderer switched, part of the slowness remains in GTK 4 itself: its X11 backend recomputes the toplevel's size on every frame —
+querying the window position (GetGeometry, TranslateCoordinates), reading `_NET_WORKAREA` and `_NET_CURRENT_DESKTOP` on the root window and
+writing `WM_NORMAL_HINTS`, about sixteen synchronous round trips per frame, the same against any X server (VcXsrv, MobaXterm, Xorg). At one or
+two milliseconds per round trip on a LAN this hardly matters; on a link with tens of milliseconds of latency GTK 4 animations drop to a few
+frames per second. For such links whole-screen remoting (remote desktop / VNC) is the better choice. The "frozen after releasing a drag"
+symptom is a different matter and has been fixed (see "Fixed defects" in the table above).
 
 ## 3. Several sessions sharing one display
 
