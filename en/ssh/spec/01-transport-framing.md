@@ -260,6 +260,20 @@ until TCP itself gives up (which can take a dozen minutes or more), with the cal
 So the write side is completed with a "disposed" error and the leftover bytes are discarded; the read side is completed as usual.
 The whole disposal path **does not throw**: it usually runs while cleaning up after some error, and a secondary I/O error surfacing there would only mask the real cause.
 
+〔Decision〕**If a read or write is still in flight at disposal, that side's buffers are returned only after it exits.** The read and write sides take their buffers from a
+process-wide memory pool and return them when that side is completed. But a read or write handed to the underlying stream keeps holding that memory:
+return it on the spot at disposal and that read or write still writes into it, or reads from it, a moment later —— writing into a buffer another connection
+has just rented (that connection's packets get corrupted), or reading someone else's data. Therefore:
+
+- A side with no call in flight at disposal is completed on the spot, together with that direction's cipher suite and compressor.
+- For a side that still has a call in flight, disposal only cancels the pending read or flush and **does not wait** for it; the in-flight call completes that side when it exits.
+  A cancelled read exits with a "disposed" error; a cancelled flush returns normally, and the caller's next write reports "disposed".
+  It does not wait because disposal often runs while cleaning up after an error, and the underlying stream does not necessarily honour cancellation
+  (ProxyCommand's anonymous pipes on Windows) —— waiting for it would hang.
+- That direction's cipher suite is likewise left for the in-flight call to dispose when it exits: zeroing the keys on the spot would make the in-flight decryption compute a spurious MAC failure.
+- If the underlying stream neither honours cancellation nor ends once closed, that read or write stays pending and that side is never completed ——
+  its buffers are eventually reclaimed by the garbage collector instead of being returned to the pool. Better to return one buffer fewer than to let one buffer belong to two owners at once.
+
 ---
 
 ## 5 Boundaries and errors
