@@ -187,7 +187,7 @@ X 协议的语义是**全局串行**的:服务端按到达顺序逐条执行所�
 | --- | --- |
 | 库 → 宿主(`IX11ServerHost`,回调名一律「主语 + 过去分词」;全部在执行线程上、放锁之后调,同一批里按 §5 合并) | 顶层窗口映射 / 取消映射(`TopLevelMapped` / `TopLevelUnmapped`,销毁、被 reparent 走也算取消映射;**收工时不逐个发**,宿主停服时自己收掉原生窗口);快照变了(`TopLevelChanged`,附 `XTopLevelChanges` 说明变了哪几组:`Geometry` —— 位置、尺寸、`BorderWidth`、`NeedsPlacement`;`Title` —— 标题、`ClassName`、`InstanceName`;`States`;`Icons`;`Shape` —— 边界形状与输入形状;`Hints` —— 其余)。窗口的属性在 `XTopLevelWindow.Snapshot` 这份不可变快照里(见下文「快照」);客户端的窗口管理器请求(`WindowManagerRequested`,接口的默认实现方法,见下文「窗口管理器请求」);损伤矩形(`TopLevelDamaged`,随后宿主经 `XTopLevelWindow.ReadPixels` / `TryReadPixels` 在像素锁里只读这几块,直接写进自己的位图;`CopyPixels` 整窗拷一份,给测试与诊断用);光标(`CursorChanged`,`XCursor`:语义形状 `XCursorShape`,位图 / ARGB / 字形光标另带图像 `XCursorImage` —— cursor 字体里有对应系统光标的字形不带,
 宿主按形状选系统光标 —— 像素是只读的 `ReadOnlyMemory<uint>`);响铃(`BellRequested`,按协议从基准音量换算出的 0–100;0 表示不响 —— `xset b off`、Bell −100);X 客户端复制了文本(`ClipboardChanged`);有客户端 GrabServer 抓着太久、别人都在等它(`ServerGrabStalled`,见 §5;默认实现什么也不做);托盘图标停靠进来 / 没了(`SystemTrayIconAdded(icon, title)` / `SystemTrayIconRemoved`,开着 `SystemTray` 时,见 §7「系统托盘」);接受本机输入法输入的 XIM 输入上下文换了或插入点动了(`InputMethodFocusChanged(XInputMethodFocus?)`:所在的顶层、程序画不画预编辑、插入点;null = 焦点所在的程序不用 XIM。开着 `InputMethodName` 时,同一批里只交最后一次,见 §7「本机输入法的 XIM 桥」);X 程序把东西拖到了所有 X 窗口以外、数据已经取来(`OutgoingDragStarted(XOutgoingDrag)`:URI、文字、拖出它的程序的连接名、根坐标),以及宿主还没交回结果时那一次在 X 这边先结束了(`OutgoingDragEnded`,开着 `AcceptOutgoingDrags` 时,见 §7「拖出」) |
-| 宿主 → 库(`X11Server` 的方法,窗口用 `XTopLevelWindow` 句柄指名;参数不合法当场抛异常,窗口已不在时静默忽略) | 输入 `Inject*`:指针移动 / 按钮(内区坐标,按 X 的 16 位范围核对,超出抛 `ArgumentOutOfRangeException`;滚轮换成 Button 4/5,6 以上是水平滚轮与侧键;X 这边没按着的按钮松开不投递,窗口已经不在时的松开照样生效)、指针离开(位置留着最后一次的,所在窗口算根、child 为 None)、按键(`InjectKey(keycode, pressed, repeat)`,X 键码;`repeat` 标明这是宿主的自动重复,见 §7);用户在宿主自己的界面里有动静(`NoteUserActivity`,空闲计时归零、不产生输入事件,每 250 毫秒至多排一个工作项);窗口管理器的动作(名字带 `TopLevel`):焦点(`FocusTopLevel`,null = 没有焦点;同时在 X 里把它抬到普通顶层的最上面,推进 last-focus-change time)、用户移动 / 缩放了原生窗口(`MoveTopLevel` / `ResizeTopLevel`,库据此改几何、发真实的 ConfigureNotify 再补 ICCCM 的合成事件、发 Expose)、关闭按钮(`CloseTopLevel`:有 `WM_DELETE_WINDOW` 协议就发 ClientMessage —— 声明了 `_NET_WM_PING` 的同时 ping 它 —— 否则断开该客户端;override-redirect 的窗口忽略)、强制结束(`KillTopLevelClient`,KillClient 语义,连同这个客户端的其它窗口)、窗口状态(`SetTopLevelStates` 整组覆盖;`ChangeTopLevelStates(window, add, remove)` 只改给出的位、其余原样,`add` 与 `remove` 重叠当场抛;都写回 `_NET_WM_STATE` 与 `WM_STATE`,`Focused` 由服务端维护)与外框尺寸(`SetTopLevelFrameExtents`,写回 `_NET_FRAME_EXTENTS`);宿主那边的环境变了(不带 `TopLevel` 的 `Set*`):键位表(`SetKeymap`,见 §7)、显示器布局(`SetScreenLayout`,发 RANDR 事件)、DPI 与缩放(`SetDisplayScale`,发 XSETTINGS,只替换 RESOURCE_MANAGER 里的 `Xft.*` 几项)、锁定键(`SetLockState(capsLock, numLock)`,不合成按键,客户端收到 XKB 的 StateNotify)、系统剪贴板有了新文本(`SetClipboardText`,UTF-8 超过 `X11Server.MaxClipboardBytes`(16 MB)当场抛 `ArgumentOutOfRangeException`);卡住时的恢复(`BreakGrabs`:解除一切指针 / 键盘抓取并解冻设备、放开 GrabServer、把浮动的从设备挂回虚拟核心设备,客户端照常收到 Ungrab 模式的事件与 HierarchyChanged);客户端清单(`GetClientsAsync` → `XClientInfo`:编号、连接名、是否以 Retain 模式断开、资源数、记账内存、映射着的顶层、是否正抓着整个服务端 `HoldsServerGrab`)与按编号断开(`DisconnectClient(int)`,Retain 模式断开过的销毁它留下的资源);本机的拖放(`InjectDragOver(window, x, y, types)` / `InjectDragLeave()` / `InjectDrop(window, x, y, data)`,服务端替宿主扮演 XDND 的源;`IsDragAccepted` 是目标最近一次的回应,见 §7「拖放」);本机输入法上屏与预编辑(`InjectText(text)`:焦点所在的程序经 XIM 连着时整段以 XIM_COMMIT 交过去,否则借键码;`InjectPreedit(text, caret)`:on-the-spot 的程序经 XIM 的预编辑回调画在自己的输入框里,别的情况不理,见 §7);宿主对服务端交来的事的答复(`Complete*`,第一个参数是那件事):X 程序拖出来的东西,本机那边放下了没有(`CompleteOutgoingDrag(drag, dropped)`,在把松开的按钮注入回来之前调,见 §7「拖出」) |
+| 宿主 → 库(`X11Server` 的方法,窗口用 `XTopLevelWindow` 句柄指名;参数不合法当场抛异常,窗口已不在时静默忽略) | 输入 `Inject*`:指针移动 / 按钮(内区坐标,按 X 的 16 位范围核对,超出抛 `ArgumentOutOfRangeException`;滚轮换成 Button 4/5,6 以上是水平滚轮与侧键;X 这边没按着的按钮松开不投递,窗口已经不在时的松开照样生效)、指针离开(位置留着最后一次的,所在窗口算根、child 为 None)、按键(`InjectKey(keycode, pressed, repeat)`,X 键码;`repeat` 标明这是宿主的自动重复,见 §7);用户在宿主自己的界面里有动静(`NoteUserActivity`,空闲计时归零、不产生输入事件,每 250 毫秒至多排一个工作项);窗口管理器的动作(名字带 `TopLevel`):焦点(`FocusTopLevel`,null = 没有焦点;同时在 X 里把它抬到普通顶层的最上面,推进 last-focus-change time)、用户移动 / 缩放了原生窗口(`MoveTopLevel` / `ResizeTopLevel`,库据此改几何、发真实的 ConfigureNotify 再补 ICCCM 的合成事件、发 Expose;拖动时的移动按客户端处理的进度合并,见 §7)、关闭按钮(`CloseTopLevel`:有 `WM_DELETE_WINDOW` 协议就发 ClientMessage —— 声明了 `_NET_WM_PING` 的同时 ping 它 —— 否则断开该客户端;override-redirect 的窗口忽略)、强制结束(`KillTopLevelClient`,KillClient 语义,连同这个客户端的其它窗口)、窗口状态(`SetTopLevelStates` 整组覆盖;`ChangeTopLevelStates(window, add, remove)` 只改给出的位、其余原样,`add` 与 `remove` 重叠当场抛;都写回 `_NET_WM_STATE` 与 `WM_STATE`,`Focused` 由服务端维护)与外框尺寸(`SetTopLevelFrameExtents`,写回 `_NET_FRAME_EXTENTS`);宿主那边的环境变了(不带 `TopLevel` 的 `Set*`):键位表(`SetKeymap`,见 §7)、显示器布局(`SetScreenLayout`,发 RANDR 事件)、DPI 与缩放(`SetDisplayScale`,发 XSETTINGS,只替换 RESOURCE_MANAGER 里的 `Xft.*` 几项)、锁定键(`SetLockState(capsLock, numLock)`,不合成按键,客户端收到 XKB 的 StateNotify)、系统剪贴板有了新文本(`SetClipboardText`,UTF-8 超过 `X11Server.MaxClipboardBytes`(16 MB)当场抛 `ArgumentOutOfRangeException`);卡住时的恢复(`BreakGrabs`:解除一切指针 / 键盘抓取并解冻设备、放开 GrabServer、把浮动的从设备挂回虚拟核心设备,客户端照常收到 Ungrab 模式的事件与 HierarchyChanged);客户端清单(`GetClientsAsync` → `XClientInfo`:编号、连接名、是否以 Retain 模式断开、资源数、记账内存、映射着的顶层、是否正抓着整个服务端 `HoldsServerGrab`)与按编号断开(`DisconnectClient(int)`,Retain 模式断开过的销毁它留下的资源);本机的拖放(`InjectDragOver(window, x, y, types)` / `InjectDragLeave()` / `InjectDrop(window, x, y, data)`,服务端替宿主扮演 XDND 的源;`IsDragAccepted` 是目标最近一次的回应,见 §7「拖放」);本机输入法上屏与预编辑(`InjectText(text)`:焦点所在的程序经 XIM 连着时整段以 XIM_COMMIT 交过去,否则借键码;`InjectPreedit(text, caret)`:on-the-spot 的程序经 XIM 的预编辑回调画在自己的输入框里,别的情况不理,见 §7);宿主对服务端交来的事的答复(`Complete*`,第一个参数是那件事):X 程序拖出来的东西,本机那边放下了没有(`CompleteOutgoingDrag(drag, dropped)`,在把松开的按钮注入回来之前调,见 §7「拖出」) |
 
 **生命周期**:构造时执行线程就开始运行,构造出来的实例即使从没 `StartAsync` 也要 `DisposeAsync`。`StartAsync` 的失败模式见 §7
 (显示号被占抛 `SocketException`(`AddressAlreadyInUse`),配置了要监听而一种传输也没开起来抛 `IOException`);失败时已经开起来的监听一并撤回,
@@ -207,7 +207,7 @@ X 协议的语义是**全局串行**的:服务端按到达顺序逐条执行所�
 几何(`X` / `Y` 是 X 窗口**边框外沿**的左上角,`Width` / `Height` 是内区,`BorderWidth`,`NeedsPlacement` 与 `PlaceInFrame`,见下文「摆放约定」)、
 标题(`_NET_WM_NAME` 优先,否则按类型解码的 `WM_NAME`)、`ClassName` / `InstanceName`(`WM_CLASS`)、override-redirect、瞬态父窗口(`TransientFor`)、
 `SupportsDeleteWindow`、所属客户端(`ClientId` / `ClientLabel`;托盘图标的嵌入窗口是服务端的,`ClientLabel` 取停靠进来的图标所属的连接)、`InputOnly`、
-`HasAlpha`(深度 32 的窗口、且服务端在当合成管理器时才为真 —— 没有合成管理器时 X 显示 ARGB 窗口不看 alpha;托盘图标例外)、`WindowType`、`States`(映射前客户端写好的状态;
+`HasAlpha`(深度 32 的窗口、且服务端在当合成管理器时才为真 —— 没有合成管理器时 X 显示 ARGB 窗口不看 alpha;托盘图标例外,输入形状只圈出窗口一部分的也例外,见 §7「合成管理器」)、`WindowType`、`States`(映射前客户端写好的状态;
 `WM_HINTS` 的 initial_state 为 IconicState 时服务端在映射时加上 `Hidden`)、`Decorated`(`_MOTIF_WM_HINTS` 要求无装饰时为 false)、
 尺寸约束(最小 / 最大、步长、`BaseWidth` / `BaseHeight` —— 最小与基准互为缺省、`MinAspect` / `MaxAspect`,一律夹到 0–32767)、
 `WinGravity`、`UserPosition` / `ProgramPosition`、`WindowGroup`、`Functions`(`_MOTIF_WM_HINTS` 的 functions,`XWindowFunctions`)、
@@ -479,6 +479,14 @@ override-redirect 窗口不归窗口管理器摆,恒为 false。`_NET_MOVERESIZE
   - 关闭时对在 `WM_PROTOCOLS` 里声明了 `_NET_WM_PING` 的窗口随 `WM_DELETE_WINDOW` 发 ping,5 秒内没回就发 `XNotRespondingRequest`。
   - 宿主移动窗口时像真的移动一样发真实的 ConfigureNotify(根窗口上选了 SubstructureNotify 的客户端、Present 都收得到,指针所在的窗口重算),
     再补 ICCCM §4.1.5 的合成事件。
+  - **拖动时的移动按客户端处理的进度合并(2026-10-10)**:宿主拖动原生窗口时每秒报几十上百次位置(Windows 每个 WM_MOVE 一次),原先每次都发一组
+    ConfigureNotify。GTK 处理一次要做几次同步往返(gnome-calculator 实测五次:真实的那条 TranslateCoordinates ×2 + GetGeometry,合成的那条
+    GetGeometry + TranslateCoordinates),客户端按到达的先后一条条处理 —— 往返 20 毫秒时拖一秒,松手之后程序还要冻住近九秒。现在交出一次移动之后
+    先等客户端处理完:窗口在 `WM_PROTOCOLS` 里声明了 `_NET_WM_PING` 就紧跟着发一条 ping(客户端按序处理事件,回了 pong 就说明前面的
+    ConfigureNotify 都处理完了;2 秒不回照样交下一次),没声明的两次之间至少隔 50 毫秒。等的期间宿主再报的位置只记最新的一个,放开时有新位置才交;
+    快照照宿主的位置给(别的属性一变就把正在拖的原生窗口拉回旧位置的那种情况不会出现);客户端自己挪窗口(ConfigureWindow、`_NET_MOVERESIZE_WINDOW`)
+    时宿主还没交出去的位置作废。X 窗口这期间停在上一次交出的位置 —— 什么时候真的挪 X 窗口本来就由窗口管理器决定。同样的拖动在往返 20 毫秒时
+    只交 4 次、松手后 0.6 秒处理完;链路快时客户端跟得上,每个位置照常都交。
   - GTK 不开客户端阴影(`ClientSideShadows`,默认关)时在窗口内沿留一圈约 4 像素(乘 GTK 的缩放倍数)的缩放区,按下就发 `_NET_WM_MOVERESIZE`
     (四边与四角),宿主经 `XMoveResizeRequest` 开始原生的缩放 —— 无边框的自绘标题栏窗口照样能拖边缩放,只是缩放区窄(gtk3-widget-factory 实测)。
 - **核心窗口请求照协议的细节**:DestroySubwindows 按堆叠次序从下到上销毁;CirculateWindow 按遮挡挑窗口(RaiseLowest 抬起被挡着的最低的,
@@ -641,6 +649,9 @@ override-redirect 窗口不归窗口管理器摆,恒为 false。`_NET_MOVERESIZE
   - **合成管理器(F11)**:`X11ServerOptions.CompositingManager`(默认关)打开时占住 `_NET_WM_CM_S0`,GTK、Qt、Electron 才用 ARGB 视觉画圆角、阴影与透明窗口。
     关着时深度 32 的窗口照样按不透明交给宿主(快照的 `HasAlpha` 为假)—— 没有合成管理器时 X 显示它们不看 alpha;要了 8 位 alpha 的 GL 程序
     (GLFW 默认就要,只拿得到 ARGB 视觉)清屏的 alpha 是 0,2026-10-10 核对之前整个窗口透出后面的东西,还白付系统合成的开销。
+    例外是输入形状(SHAPE 1.1)只圈出窗口一部分的 ARGB 窗口(2026-10-10):GTK 4 不论有没有合成管理器,弹出菜单都按 ARGB 视觉画、四周留二十来像素
+    alpha 为 0 的阴影区,再用输入形状只圈出菜单本体 —— 不看 alpha 的话那一圈在宿主上是一道黑边(gnome-calculator 的模式下拉菜单实测)。
+    客户端自己声明了「这一圈不是窗口的一部分」,就照 alpha 显示(宿主上是带柔和阴影的菜单);输入形状盖满整个窗口、或者根本没设(上面那种 GL 程序)的仍按不透明。
     远端跑了个合成器(`xfwm4 --replace` 之类)接走这个选区又退出、或者谁把属主设成了 None 时,服务端接回来,按 ICCCM §2.8 向根窗口广播
     MANAGER(选了 StructureNotify 的客户端收到)。`ClientSideShadows` 仍默认关(Windows 上透明的阴影区照样接住鼠标)。
   - **X-Resource 的 LocalClientPid(F28)**:经 Unix 套接字连进来的客户端记下对端 pid(Linux 经 SO_PEERCRED,macOS 经 LOCAL_PEERPID),
@@ -1018,3 +1029,16 @@ override-redirect 窗口不归窗口管理器摆,恒为 false。`_NET_MOVERESIZE
   ② 拖出 —— 用 XDND 第 4 版起的根窗口 `XdndProxy` 约定,不必猜指针下面是不是本机窗口:凡是落在 X 窗口以外的都交给宿主。Java 不看根窗口的
   `XdndProxy`,于是拖动期间把代理窗口悄悄垫在最底下、带 `WM_STATE`;不发结构事件,只在源抓着指针的期间存在。动作只给复制。
   数据在 X 那边就取好(拖着时取,协议允许),宿主拿到的是 URI 与文字;取回远端文件、发起本机拖放是宿主的事(见宿主仓库 `plan.md`)。
+- **gnome-calculator 的三个现象:拖动后冻住、下拉菜单黑边、操作卡(2026-10-10)**:用户报告远端 Ubuntu 上的 `gnome-calculator`(GTK 4)
+  操作卡、移动窗口后冻住一阵、模式下拉菜单有一圈黑边。在 X 连接上加一层统计每条请求 / 事件、可以人为加延迟的包装逐条量下来:
+  ① 冻住是库的问题 —— 拖动时每个中间位置都发一组 ConfigureNotify,GTK 每组做五次同步往返,往返 20 毫秒时拖一秒、松手后冻 8.9 秒;
+  改成按客户端处理的进度合并(`_NET_WM_PING` 当屏障,§7)之后 0.6 秒。选 ping 而不是固定的节流间隔:节流间隔小于客户端处理一次的时间就照样越积越多,
+  而处理一次要多久取决于链路,服务端事先不知道;ping 由客户端按序处理事件这一点保证「回了就是处理完了」,链路多慢都对。
+  ② 黑边是库的取舍造成的 —— GTK 4 的弹出菜单不论有没有合成管理器都带 alpha 为 0 的阴影区,合成管理器关着(默认)时按不透明显示成了黑边;
+  改成输入形状只圈出一部分的 ARGB 窗口照 alpha 显示(§7「合成管理器」)。没有选「默认打开合成管理器」:那样所有 ARGB 窗口都要系统多合成一层、
+  GL 程序清屏的 alpha 又会透出后面,而只有弹出菜单这类客户端自己声明了边缘不是窗口的窗口需要它。
+  ③ 操作卡主要在客户端 —— GTK 4 默认的 GL 经 SSH 退到 llvmpipe、每帧整窗 PutImage(点一下按钮 29 MB,`GSK_RENDERER=cairo` 时 0.15 MB),
+  宿主改为在开着 X11 转发的会话里替用户设 `GSK_RENDERER=cairo`(见宿主仓库 `plan.md`);另外 GTK 4 的 X11 后端每画一帧都要重算顶层尺寸
+  (GetGeometry、TranslateCoordinates、读根窗口的 `_NET_WORKAREA` 与 `_NET_CURRENT_DESKTOP`、写 `WM_NORMAL_HINTS`,一帧约十六次往返),
+  对任何 X 服务端都一样,服务端省不掉 —— 高延迟链路上 GTK 4 程序经 X11 转发注定慢,那种场景该换整屏传输的方式。我们自己的链路
+  (SSH 库 + 连接器 + 服务端)量下来一次往返的额外开销中位 0.5 毫秒以内,不是瓶颈。

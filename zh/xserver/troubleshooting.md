@@ -12,7 +12,7 @@ English: [`../../en/xserver/troubleshooting.md`](../../en/xserver/troubleshootin
 | --- | --- | --- |
 | 终端里打出 `libEGL warning: DRI3 error: Could not get DRI3 device` | Mesa 先试 DRI3 硬件加速。DRI3 要在同一台机器上传文件描述符,经 SSH 转发不可能做到 | **无害**,Mesa 随即退回软件渲染。不想看见就在远端设 `LIBGL_ALWAYS_SOFTWARE=1` |
 | GTK4 程序要等 25 秒、50 秒才出窗口,期间几乎不占 CPU | 桌面门户(`xdg-desktop-portal`)起不来,程序对它的 D-Bus 调用各等满 25 秒超时 | 见[一](#一启动慢一次-25-秒) |
-| 窗口出来了,但操作掉帧、不流畅 | GTK4 默认 GL 渲染,远端没有 GPU 时退到 llvmpipe,每一帧把**整窗像素**经 SSH 发过来 | 见[二](#二操作卡) |
+| 窗口出来了,但操作掉帧、不流畅 | GTK4 默认 GL 渲染,远端没有 GPU 时退到 llvmpipe,每一帧把**整窗像素**经 SSH 发过来;GTK4 每画一帧还要做十几次同步往返,链路延迟越高越慢 | VelaShell 在开着 X11 转发的会话里已经替你设了 `GSK_RENDERER=cairo`(2026-10-10 起,只对从那个终端里启动的程序生效);别的方式启动的见[二](#二操作卡) |
 | 运行 GTK 程序(实测 `gnome-calculator`)之后终端停住、本机不出窗口,按 Ctrl+C 才回到提示符;VelaShell 的日志里什么也没有 | 远端机器上这个用户正登录着 Wayland 桌面。SSH 会话里没有 `WAYLAND_DISPLAY`,但 `XDG_RUNTIME_DIR` 与桌面是同一个目录,里面有桌面的 `wayland-0`;GTK 先试 Wayland,就连上了它 —— 窗口开到了远端机器自己的屏幕上,没走 X11 转发 | 见[四](#四窗口开到了远端机器自己的桌面上) |
 
 **内置 X Server 有意的行为**
@@ -43,6 +43,8 @@ English: [`../../en/xserver/troubleshooting.md`](../../en/xserver/troubleshootin
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
+| 拖动 X 窗口(尤其 GTK 4 程序,如 `gnome-calculator`)之后程序冻住一阵才能继续操作;链路延迟越高冻得越久 | 库的缺陷:拖动时每个中间位置都发一组 ConfigureNotify,GTK 处理每组要做五次同步往返,松手之后还在一条条补 —— 往返 20 毫秒时拖一秒冻 8.9 秒 | 已修(2026-10-10):客户端处理完上一次移动才交下一个位置,同样的拖动松手后 0.6 秒([architecture.md](design/architecture.md) §7「拖动时的移动按客户端处理的进度合并」) |
+| GTK 4 程序的下拉菜单、弹出菜单四周有一圈黑边(`gnome-calculator` 的模式切换) | 库的取舍:GTK 4 的弹出菜单不论有没有合成管理器都在四周画透明的阴影区,「X 窗口透明与圆角」关着(默认)时按不透明显示成了黑色 | 已修(2026-10-10):这类客户端声明了边缘不是窗口一部分的窗口照透明度显示,菜单带着柔和的阴影;不用打开「X 窗口透明与圆角」 |
 | 在标题栏把 X Server 停掉再开之后,远端报 `Failed to open display` | 宿主缺陷:连接器记住的是停掉之前的那个服务端 | 已修([architecture.md](design/architecture.md) 决策记录「M3:SSH 的 x11 通道经连接器直接接进服务端」);旧版本重连 SSH 即可 |
 | 远端程序退出了,本机窗口却一直不关 | 宿主缺陷:远端的 EOF 没传给 X Server | 已修(同上;[SSH spec 07 §7.5.9](../ssh/spec/07-forwarding.md#759-本机显示经连接器接入)) |
 | 在设置里把引擎换成 VcXsrv 之后,已经开着的 SSH 会话里新开的 X 程序报 `Failed to open display` | 宿主缺陷:会话开 shell 时绑定的连接器只认内置引擎 | 已修(同上):内置引擎停了之后,老会话的 x11 通道改走本机 TCP,连此刻在运行的那个 X 服务端(2026-10-10 起只在 Windows 上这样做:别的平台没有 VcXsrv,环回上那个端口不会是我们的服务端) |
@@ -98,8 +100,15 @@ GTK4 默认用 GL 渲染。经 SSH 转发时 Mesa 拿不到 GPU,退到 llvmpipe 
 
 (`gnome-calculator` 窗口 365×509;端到端测量:Docker 里的 Ubuntu 24.04 sshd,经 VelaShell.Ssh 的 X11 转发接进内置 X Server。)
 
-X Server 这一侧没法替客户端选渲染器 —— Mesa 的软件 EGL 只靠核心协议就能工作,所以设 `GSK_RENDERER=cairo` 是远端的事,
-上面那段 `~/.bashrc` 已经带上了。
+X Server 这一侧没法替客户端选渲染器 —— Mesa 的软件 EGL 只靠核心协议就能工作,所以设 `GSK_RENDERER=cairo` 是远端的事。
+2026-10-10 起 VelaShell 在开着 X11 转发的会话里连接后替你设上(与 `XMODIFIERS` 同一句静默注入,已经设了的不动 —— 想用 GL 就在远端的 rc 里先设好它,比如
+`export GSK_RENDERER=ngl`);从远端桌面菜单、systemd、`ssh host 程序` 这类不经那个终端的方式启动的程序拿不到,靠上面那段 `~/.bashrc`。
+同一次点击在 cairo 下是 0.15 MB,GL 下是 29 MB;打开模式下拉菜单 3.6 MB 对 11 MB。
+
+渲染方式换了之后还剩一部分慢在 GTK 4 自己:它的 X11 后端每画一帧都要重算顶层窗口的尺寸 —— 查窗口位置(GetGeometry、TranslateCoordinates)、
+读根窗口的 `_NET_WORKAREA` 与 `_NET_CURRENT_DESKTOP`、写 `WM_NORMAL_HINTS`,一帧约十六次同步往返,对任何 X 服务端(VcXsrv、MobaXterm、Xorg)都一样。
+局域网上一次往返一两毫秒,影响不大;延迟几十毫秒的链路上 GTK 4 的动画会掉到每秒几帧。这种链路建议改用传整个屏幕的方式(远端桌面 / VNC)。
+拖动窗口造成的「松手后冻住」是另一回事,已经修好(见上表「已修的缺陷」)。
 
 ## 三、多个会话共用一个显示
 
