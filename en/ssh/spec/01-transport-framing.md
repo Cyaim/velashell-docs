@@ -328,6 +328,11 @@ Receive: decrypt/verify → strip padding → payload → decompress → message
   〔Decision〕**A zlib end-of-stream marker (the final block) in the peer's payload disconnects on that packet**, reported as `ProtocolError` (decompression failure);
   the packet is not handed to the upper layer. OpenSSH's decompression treats the end of the stream as fatal too.
   Previously: the packet carrying the marker was accepted, and the decoder then refused every byte of the following packets —— the error surfaced one frame late as an unexplained "decompression failed".
+- 〔Decision〕**A packet's payload is decompressed in full**: once all the input has been fed to the decoder, if its last call stopped because the output buffer was full,
+  keep draining without feeding input until it no longer reports that the buffer is too small. The partial flush at the end of each of the peer's packets is an empty block only a few bits long,
+  not a byte-aligned `00 00 FF FF` like a sync flush: as soon as the codes of the last match are read, the whole input may already be inside the decoder while that match has not been fully copied.
+  Previously: decompression stopped as soon as the input was used up, and the few pending bytes came out at the start of the next packet —— this packet was short and the next one entirely misaligned,
+  and the connection dropped with `ProtocolError` (X11 forwarding with compression on dropped as soon as a GTK program drew a large window).
 
 The compressed `payload` length is still subject to the limit of §1.1;
 **the decompressed length MUST also be capped**, otherwise a small packet could decompress into arbitrarily large memory —— i.e. a zip bomb.

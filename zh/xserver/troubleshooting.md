@@ -43,6 +43,8 @@ English: [`../../en/xserver/troubleshooting.md`](../../en/xserver/troubleshootin
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
+| 在 GTK 程序(实测 `gnome-calculator`)的输入框里打字,敲第一个键程序就退出,终端里打出 `The program 'gnome-calculator' received an X Window System error` …… `BadMatch` …… `request_code 93` | 库的缺陷:GTK 打字时把鼠标指针藏起来,用的隐形指针是 1×1 的位图配热点 (1, 1),热点落在图的右下边界上;服务端按字面要求热点在图里、回了 BadMatch,GTK 收到没拦下的 X 错误就退出。与打的是不是中文无关 | 已修(2026-10-12):热点落在右边或下边的边界线上照收,一个像素也不显示的位图光标交给宿主当隐形指针([architecture.md](design/architecture.md) §7「字体」) |
+| 连接开着「压缩」时,运行 GTK 程序(实测 `gnome-calculator`)一两秒后整条 SSH 连接断开,终端一起掉线;之后每次运行都这样 | SSH 库的缺陷:解压一个报文时输入一喂完就收工,而解码器手里可能还压着几个字节(OpenSSH 每个报文末尾的部分 flush 只有几个位)。整窗像素这种大块数据最容易撞上,报文短了几个字节,连接以协议错误断开 | 已修(2026-10-12)([SSH spec 01](../ssh/spec/01-transport-framing.md) §6、[SSH 架构](../ssh/design/architecture.md) §11.2.30)。旧版本在连接配置里关掉「压缩」即可绕开 |
 | 拖动 X 窗口(尤其 GTK 4 程序,如 `gnome-calculator`)之后程序冻住一阵才能继续操作;链路延迟越高冻得越久 | 库的缺陷:拖动时每个中间位置都发一组 ConfigureNotify,GTK 处理每组要做五次同步往返,松手之后还在一条条补 —— 往返 20 毫秒时拖一秒冻 8.9 秒 | 已修(2026-10-10):客户端处理完上一次移动才交下一个位置,同样的拖动松手后 0.6 秒([architecture.md](design/architecture.md) §7「拖动时的移动按客户端处理的进度合并」) |
 | GTK 4 程序的下拉菜单、弹出菜单四周有一圈黑边(`gnome-calculator` 的模式切换) | 库的取舍:GTK 4 的弹出菜单不论有没有合成管理器都在四周画透明的阴影区,「X 窗口透明与圆角」关着(默认)时按不透明显示成了黑色 | 已修(2026-10-10):这类客户端声明了边缘不是窗口一部分的窗口照透明度显示,菜单带着柔和的阴影;不用打开「X 窗口透明与圆角」 |
 | 在标题栏把 X Server 停掉再开之后,远端报 `Failed to open display` | 宿主缺陷:连接器记住的是停掉之前的那个服务端 | 已修([architecture.md](design/architecture.md) 决策记录「M3:SSH 的 x11 通道经连接器直接接进服务端」);旧版本重连 SSH 即可 |
