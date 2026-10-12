@@ -597,6 +597,9 @@ extra (the slack is not charged).
   looks like a number (`CHARSET_ENCODING "1"`).
   Glyph cursors are baked into images as the protocol specifies (the origins of the source and mask glyphs coincide at the hotspot); one with
   no visible pixel (xterm's invisible pointer, a blank glyph of `nil2`) reaches the host as `Hidden`, and an undefined glyph gets BadValue.
+  Bitmap cursors (core CreateCursor) likewise: one whose mask is all zero reaches the host as `Hidden`; the hotspot must lie in the source, but the
+  right and bottom edges are accepted too — the invisible pointer GDK uses to hide the pointer while typing is a 1×1 bitmap with hotspot (1, 1) and no
+  error trap, so BadMatch made a GTK program exit on its first keystroke in a text box.
   Glyphs of the `cursor` font (X.Org's cursor.bdf) also record the glyph number: those with a matching system cursor (left_ptr, xterm, watch, the
   resize edges and corners …) reach the host as a shape without an image — the system cursor follows the desktop's theme and scaling —, the rest
   (pencil, gumby, dotbox …) hand the host the image; XFIXES GetCursorImage always returns the baked image. Modern toolkits do not use core fonts

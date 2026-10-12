@@ -2705,6 +2705,24 @@ Verification: four new transport tests, with an underlying stream that hands out
 the receive cipher suite is not disposed before the in-flight read exits; on a stream that honours cancellation the pending read exits with a "disposed" error. All four fail on the implementation before the fix.
 In the host's tests, the handshake helper now closes the client and waits for the server side to finish before rethrowing when the client fails.
 
+### 11.2.30 Decompression: the decoder still holding output when the input is used up (2026-10-12)
+
+Origin: a user's connection had compression on; launching `gnome-calculator` on a remote Ubuntu through the built-in X Server's X11 forwarding dropped the whole connection a second or so later, the terminal with it.
+Reproduced on Ubuntu 24.04 in Docker (OpenSSH 9.6, `Compression yes` by default): with the built-in X Server at 2× scaling and GTK on its default GL renderer,
+as soon as the whole-window PutImage requests arrived the connection dropped with "reading a string needs 32768 bytes, only 32759 left" —— a 32 KiB channel data packet came out 9 bytes short after decompression.
+
+| Problem | Decision |
+| --- | --- |
+| Decompression stopped once the input was used up. OpenSSH ends each packet with a partial flush, an empty block only a few bits long: when the codes of the last match have been read, the whole input may already be inside the decoder while the output buffer (16 KiB per call) fills up in the middle of that match —— the pending bytes were left for the next packet | Once the input is used up, if the decoder's last call reported the buffer too small, keep draining without feeding input until it no longer does ([`spec/01`](../spec/01-transport-framing.md) §6). The limit is unchanged: pending output beyond it still disconnects as a decompression bomb |
+
+Introduced on 2026-10-09 with the switch to .NET 11's `ZLibDecoder`: the stream-based decompression before it read until no more data came out and could not miss output the decoder was holding.
+The library's own compressor ends every packet with a sync flush, a byte-aligned `00 00 FF FF` —— those bytes are still unread when the output fills up, so the input is never used up first,
+and the round-trip tests could not catch it.
+
+Verification: a new test builds a fixed-Huffman stream by hand per RFC 1951, aligning the distance code of the last match with the packet's last byte; it fails before the fix.
+Another makes the decompressed length an exact multiple of the output chunk, or exactly the limit. The reproduction program (built-in X Server + the library's X11 forwarding + sshd and gnome-calculator in a container)
+dropped two runs out of three before the fix and none out of four after it.
+
 ### 11.3 Switch-over strategy with VelaShell
 
 1. VelaShell's `ISshClientWrapper` / `ISftpClientWrapper` / `IShellStreamWrapper`

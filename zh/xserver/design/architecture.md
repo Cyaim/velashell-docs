@@ -427,7 +427,8 @@ override-redirect 窗口不归窗口管理器摆,恒为 false。`_NET_MOVERESIZE
   870 ms、共 58 MB。这些都不在执行线程上做:OpenFont 与 ListFontsWithInfo 要用到还没建好的字体时,字体在线程池上解压、解析,
   这个客户端的这条与之后的请求暂存(与 SYNC 的 Await 同一套),建好了按原顺序放回 —— 别的客户端与宿主界面不陪着等像素锁。BDF 里带引号的属性值是字符串(QueryFont 里回原子),看上去是数字的也一样(`CHARSET_ENCODING "1"`)。
   字形光标按协议烙成图像(源与掩码字形的原点重合即热点),一个像素也不显示的(xterm 拿 `nil2` 的空白字形做的隐形指针)给宿主 `Hidden`,
-  字形没定义回 BadValue。`cursor` 字体(X.Org 的 cursor.bdf)的字形另记下字形号:有对应系统光标的(left_ptr、xterm、watch、缩放边角……)按形状交给宿主、
+  字形没定义回 BadValue。位图光标(核心的 CreateCursor)同样:mask 全为 0 的给宿主 `Hidden`;热点要落在 source 里,但右边与下边的边界线也放行 ——
+  GDK 打字时藏起指针用的隐形指针是 1×1 的位图配热点 (1, 1),而且不设错误陷阱,回 BadMatch 的话 GTK 程序在文本框里敲第一个键就因 X 错误退出。`cursor` 字体(X.Org 的 cursor.bdf)的字形另记下字形号:有对应系统光标的(left_ptr、xterm、watch、缩放边角……)按形状交给宿主、
   不给图像 —— 系统光标跟着桌面的主题与缩放 ——,没有对应的(pencil、gumby、dotbox……)把图像交给宿主;XFIXES 的 GetCursorImage 一律给烙好的图像。
   现代工具包不用核心字体(走 RENDER + 客户端栅格化),所以核心字体只需覆盖老程序。
 - **RENDER 在 8888、a8 与 a1 目标上用整数合成**:像素一律预乘 alpha。到 a8r8g8b8 / x8r8g8b8 / a8 / a1 目标时,全部 53 种运算
