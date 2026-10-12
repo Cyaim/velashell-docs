@@ -2741,8 +2741,12 @@ Pauses of the sender itself (a remote X program between two frames) are also rec
 No RTT estimate was introduced: judging idle waits needs only the rhythm of arrivals, not the length of the round trip.
 
 Verification: the existing window tests used a window of a single packet (32 KiB), which hits zero with every packet, so they could not catch this. The link simulation gained a bandwidth-only data direction (a `DelayedStream` on the server side),
-and two tests were added: with a 256 KiB window, 20 ms round trip and 40 MB/s (bandwidth-delay product 800 KB) the window must grow — before the fix it stayed at 256 KiB;
-with a 1 ms round trip and 2 MB/s (bandwidth-delay product 2 KB) it must not. Over the library's X11 forwarding the same full-window animation went from 9 to 64 frames per second and glxgears (1280×720) from 9 to 61,
+and one test was added: with a 256 KiB window, 20 ms round trip and 40 MB/s (bandwidth-delay product 800 KB) the window must grow — before the fix it stayed at 256 KiB.
+The opposite, "the window must not grow when bandwidth is the bottleneck", also went through the link simulation at first and failed on macOS CI (the window reached 768 KiB): the simulator
+schedules the next allowed send from the planned time (so scheduling jitter does not accumulate), and when a timer wakes late it sends the backlog in one go, so "evenly spaced arrivals" became
+"batches with gaps in between" — which the criterion rightly takes as sitting idle. So the criterion was pulled out into `CreditIdleDetector`, which only takes the times it is given, and is checked
+tick by tick against arrival sequences: even spacing does not count, batches do, a reader that has not drained does not, a window below 4 packets does not, the previous round is discarded after a grow,
+and the first two rounds are not judged. Over the library's X11 forwarding the same full-window animation went from 9 to 64 frames per second and glxgears (1280×720) from 9 to 61,
 the same as with the window fixed at 8 MiB (host repository `scripts/xserver/perf/perf.cs --ssh`).
 
 ### 11.3 Switch-over strategy with VelaShell
