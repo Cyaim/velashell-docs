@@ -269,8 +269,8 @@ exported settings.
 | Go to the typed path | `Enter` | — |
 | Cancel path editing | `Esc` | — |
 | Open the selected file or folder | `Double Click` | — |
-| Jump to the item whose name starts with what you type | `Type the name` | Upload picker only |
-| Open the selected folder (with files or several items selected, Enter uploads them) | `Enter` | Upload picker only |
+| Jump to the item whose name starts with what you type | `Type the name` | — |
+| Open the selected folder | `Enter` | — |
 
 ### File Operations
 
