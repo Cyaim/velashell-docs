@@ -123,6 +123,18 @@ two milliseconds per round trip on a LAN this hardly matters; on a link with ten
 frames per second. For such links whole-screen remoting (remote desktop / VNC) is the better choice. The "frozen after releasing a drag"
 symptom is a different matter and has been fixed (see "Fixed defects" in the table above).
 
+Before 2026-10-12 there were two more causes on VelaShell's own side, both fixed:
+
+- **Programs that redraw the whole window ran at single-digit frame rates over SSH**: the SSH channel's receive window stayed at 256 KiB, so throughput was capped
+  at "window / round trip" (around 30 MB/s over Docker's port forwarding), and programs that send whole-window pixels every frame (GTK 4 with GL rendering, glxgears,
+  browsers) managed 9 frames per second over SSH. The window now grows with the link, and the same programs run at around 60 frames per second.
+- **An occasional hitch of up to about half a second**: on Windows the UI framework VelaShell uses (Avalonia) occasionally waits half a second before handing the next frame
+  to the system — only when a program redraws intermittently (echoing typed text, dragging with the pointer); while typing, about once per hundred keys. An X window
+  now draws every frame for 2 s after you operate in it, so it no longer runs into this.
+
+To measure frame rates and latency on your own machine, use `scripts/xserver/perf/perf.cs` in the host repository (instructions at the top of the file;
+`--ssh --netem "delay 15ms"` simulates a remote link).
+
 ## 3. Several sessions sharing one display
 
 The built-in X Server has a single display (`:N`), and every SSH session with X11 forwarding connects to it. That is exactly what

@@ -207,8 +207,8 @@ throughput ceiling ≈ window / RTT
 | --- | --- |
 | Initial | 256 KiB |
 | Round | The span between two window adjustments. Resizing is decided at each adjustment; there is no separate RTT estimate — when the window is the bottleneck, a round is roughly one round trip |
-| Grow | In this round the window **ran low** (remaining ≤ 1/8 of the window size) **and** the reader was **recently starved** (this round or the previous one) → window ×2, up to `max`; the extra amount is first requested from the session budget (see below) and granted to the peer with this very adjustment |
-| Shrink | Did not run low for 3 consecutive rounds → window ×0.75 (floor `min`); done by granting a little less this round — credit already granted cannot be taken back |
+| Grow | In this round the window was **tight** (it **ran low**: remaining ≤ 1/8 of the window size; or the reader **sat idle**: the longest wait for the next packet after draining everything took at least 1/4 of the last two rounds) **and** the reader was **recently starved** (this round or the previous one) → window ×2, up to `max`; the extra amount is first requested from the session budget (see below) and granted to the peer with this very adjustment |
+| Shrink | Not tight for 3 consecutive rounds → window ×0.75 (floor `min`); done by granting a little less this round — credit already granted cannot be taken back |
 
 〔Decision〕**Growing requires two conditions at once: the window ran low, and the reader was starved.**
 "Ran low" alone cannot tell who made it run low: with a slow reader, data piles up unread in the pipe, no adjustment is sent, and the window runs low just the same —
@@ -223,6 +223,28 @@ and then waits idly for a round trip until the next round arrives; a slow reader
 - Each time data arrives we take a look: if everything handed to the reader so far has been read, that counts as "starved". The channel's first packet does not count — the pipe is naturally empty then.
 - "Recently" means this round or the previous one: the adjustment often happens before a round's data has all arrived, so starving (at the start of a round) and running low (at its end) end up on either side of that adjustment.
 - No proportional line such as "less than 1/N unread": timing crosses such a line by accident, and the window would rise and fall at random.
+
+〔Decision〕**Besides "ran low", "sat idle" also counts.** Looking only at the remaining window on our books cannot reveal that the window is the bottleneck
+on a link where the window holds several packets and data trickles in packet by packet at the link's bandwidth (which is what real links do):
+the adjustment goes out once half the window has been consumed, and during the round trip in which the peer sits waiting for that credit,
+our books already count it, so the remaining window bottoms out around one half and never reaches 1/8. "Ran low" is only visible when the window
+is one or two packets, or when a whole window of data arrives at once.
+〔History〕Early versions looked only at "ran low": over Docker Desktop's port forwarding (effective round trip about 8 ms) the window stayed at 256 KiB
+and SSH only reached 30 MB/s; X11 forwarding over it ran a full-window animation at 9 frames per second, versus 60 with the window fixed at 8 MiB.
+
+What tells "waiting for credit" apart from "waiting for bandwidth" is the rhythm of arrivals: when the window is the bottleneck, the peer sends all its credit
+in one go and stops to wait for the adjustment, so data arrives in batches separated by nearly a round trip of silence; when bandwidth is the bottleneck,
+the peer always has credit and data arrives evenly, one packet every "packet / bandwidth", so the longest gap is the transmission time of one packet —
+two rounds (one window) hold "window / maximum packet" packets (8 for 256 KiB / 32 KiB), so that gap is about 1/8 of the two rounds. Concretely:
+
+- Whenever a packet arrives and everything handed to the reader so far has been read (the reader drained it and is waiting), note how long it has been since the previous packet; keep the longest such wait per round.
+- At each adjustment take the longest wait of this round and the previous one; if it is at least 1/4 of the two rounds' total span (from the adjustment before last to this one), the reader sat idle. Two rounds rather than one: the adjustment goes out at half a window,
+  which often cuts one batch into two rounds, and the gap falls into only one of them.
+- After growing once, the wait recorded for the previous round is discarded — growing again needs a fresh round of idle waiting as evidence, so one gap never grows the window twice.
+- With a window of fewer than 4 packets (the `maximum packet size` we announce) only "ran low" counts: two rounds then hold only a few packets, and even evenly spaced arrivals leave gaps of 1/4;
+  and with a window that small, running low is visible anyway.
+- Pauses where the sender simply has nothing to send (a remote X program between two frames, a command busy computing) are recorded as idle waits too. A somewhat larger window is harmless then:
+  the other condition for growing is a reader that keeps up, so unread data does not pile up; the ceiling is still `max` and the session budget.
 
 `WindowPolicy.Fixed(n)` is also provided for scenarios that need deterministic memory usage.
 

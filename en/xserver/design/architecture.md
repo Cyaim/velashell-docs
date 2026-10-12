@@ -1088,6 +1088,14 @@ extra (the slack is not charged).
   drags text out of the X windows and, once the host drops it, `exportDone` reports COPY. The XIM protocol details (three transports, byte orders,
   nested attributes, errors) also have byte-level unit tests (`XimTests`, the test client playing the Xlib side); drag-out flow control and
   cleanup are in `OutgoingDragTests`.
+- **Frame rate and responsiveness** (run by hand, not in CI): `scripts/xserver/perf/` — the `velashell-xperf` image (`xprobe`: pointer follower,
+  full-window color change per key press, full-window PutImage + XSync animation; glxgears, x11perf, xterm, the GTK 3 / 4 demos and sshd) and `perf.cs`.
+  `perf.cs` starts the server with the real Avalonia host (`--headless` swaps in a simulated host that reads pixels every 16.7 ms); clients connect directly
+  from Docker, or with `--ssh` through the host's SSH library over X11 forwarding (the same path as the host; `--netem` simulates link latency, `--compress`
+  turns on compression). It injects pointer / key input straight into the server and measures until the server reports the damage it caused,
+  and it subscribes to the host-side meter `VelaShell.XServer.Host` (frames read per second, damage-to-bitmap latency, time spent reading pixels) and
+  to the execution thread's busy time; it also reports UI-thread dispatch latency. Always run it in Release — the Debug server is an order of magnitude slower.
+  Findings and numbers are in §10, "Investigating frame rate and responsiveness".
 - When the specification and the implementation disagree, **the specification wins**: fix the implementation and
   record it in §10.
 
@@ -1517,3 +1525,26 @@ extra (the slack is not charged).
   sixteen round trips per frame), the same against any X server and nothing the server can save — GTK 4 over X11 forwarding is bound to be slow
   on high-latency links, where whole-screen remoting is the better fit. Our own path (SSH library + connector + server) measured a median
   overhead below 0.5 ms per round trip, so it is not the bottleneck.
+- **Investigating frame rate and responsiveness (2026-10-12)**: the user found the refresh rate and the feel of input lacking. A measurement rig was built (§9,
+  `scripts/xserver/perf/`), and the pipeline was measured piece by piece:
+  ① **The server and the host themselves are fast enough**: over a direct Docker connection, injected input to damage is p50 0.4 ms and p99 under 2 ms; a full-window
+  animation runs at 340–400 frames per second at 1280×720 and 139 at 1920×1080 on the client side, the host reads a full 60 frames per second (60 Hz display), the
+  execution thread is 9–12% busy, and reading a full 1080p window takes p50 1.4 ms; GTK 3 / 4 animations hold 60 frames per second; UI-thread dispatch latency peaks at 2.6 ms.
+  ② **X11 over SSH managed only 9 frames per second because the SSH library's adaptive window never grew**: throughput was capped at 256 KiB / round trip,
+  30–60 MB/s, and growing only counted "ran low", which never shows when data trickles in. After the SSH library also counts "sat idle" (SSH architecture §11.2.31),
+  the same animation runs at 64 frames per second over SSH and glxgears at 61; with 15 ms of added one-way latency, injected input to damage is p50 16 ms (our side adds 1 ms),
+  and full-window animations and GTK 4 slow down with the synchronous round trips the clients make every frame — that is how the clients are written.
+  ③ **The occasional hitch is in Avalonia**: with intermittent updates there is a 400–490 ms stall every ten to several tens of seconds; the UI thread is idle and DWM keeps
+  producing frames, and a dump taken during the stall shows Avalonia's render timer thread waiting for the Windows compositor to confirm the previous commit. It has nothing to do
+  with X — a pure Avalonia program that only changes a piece of text does the same; all three DWM-based composition modes do it, RedirectionSurface less often but not never;
+  it never happens when every frame has something to draw — it is the confirmation for "the first idle tick after a run of frames" that occasionally takes hundreds of milliseconds.
+  At a typing rhythm (80–600 ms between keys) it hits about once per hundred keys; keeping warm for only 300 ms made it worse (more transitions to idle), 1 s brought it to zero.
+  The host now keeps an X window warm for 2 s after it is activated or the pointer enters it, or after the user presses a key, moves the pointer, clicks, scrolls or commits
+  input-method text in it (activation and pointer entry start the loop at once — the program redraws its focus and cursor and then goes quiet, so the first key lands right after
+  a run of frames turns idle; key presses and similar input only extend the warm period and their responses are drawn first as usual: the first input after a long enough quiet spell
+  does not hit the stall anyway, and drawing an empty frame ahead of it would only delay it by a frame or two): frames without new damage still redraw
+  (without touching the pixel lock), so the render loop has no idle tick. Only user input warms a window, not damage — a blinking cursor or a clock redraws on its own with nobody waiting,
+  and warming on it would keep the window redrawing at 60 frames per second forever. The cost is that new damage during the warm period waits for the next tick, about a frame on average.
+  ④ **RANDR reports the real refresh rate**: the host never filled in `XMonitor.RefreshRate`, so 60 was always reported and GTK, Qt and browsers drew only 60 frames per second
+  even on high-refresh displays; on Windows the host now reads the current display mode's refresh rate through the monitor handle (macOS / Linux still report 60).
+  The server library itself did not change.

@@ -364,9 +364,12 @@ throughput ceiling ≈ window / RTT
 ```
 
 We let the window adapt within `[256 KiB, 64 MiB]`, but **without estimating RTT or BDP**. The criterion looks only at two things visible locally:
-whether the window **ran low** in this round (between two top-ups; ≤ 1/8 left), and whether the reader was **starved — read everything and waited** — recently (this round or the previous one).
+whether the window was **tight** in this round (between two top-ups) — it **ran low** (≤ 1/8 left), or the reader **sat idle waiting for credit** (the longest wait for the next packet after draining everything took at least 1/4 of the last two rounds) —
+and whether the reader was **starved — read everything and waited** — recently (this round or the previous one).
 Only when both hold does it double — with too small a window, a fast reader drains the data and waits a round trip; with a slow reader, running low is the reader's doing and a bigger window buys no throughput.
-After 3 rounds that never ran low it shrinks ×0.75. No timing criterion like "how long between two top-ups": that is always true on a LAN and would inflate the window to the maximum for nothing.
+"Sat idle" was added on 2026-10-12 (§11.2.31): with a window of several packets and data trickling in at the link's bandwidth, the top-up goes out at half a window and the remaining window on our books never reaches 1/8, so "ran low" alone cannot see that the window is the bottleneck;
+waiting for credit makes data arrive in batches separated by nearly a round trip, waiting for bandwidth makes it arrive evenly with gaps of one packet's transmission time, and that rhythm tells the two apart.
+After 3 rounds that were never tight it shrinks ×0.75. No timing criterion like "how long between two top-ups": that is always true on a LAN and would inflate the window to the maximum for nothing.
 The policy is exposed via `SshChannelOptions.WindowPolicy` (`SshWindowPolicy.Fixed(n)` / `Adaptive(min, max)`);
 the exact rules are in `spec/05-connection.md` §3.3.
 **Saves memory on a LAN, saturates bandwidth on transoceanic links.**
@@ -630,7 +633,7 @@ A **thin shim**: the type names and method signatures of `Tmds.Ssh`, forwarding 
 | :-: | --- | --- | --- |
 | 1 | **Send coalescing** | A single writer drains the queue in one go, Seals each frame into the PipeWriter, and Flushes once | High-concurrency SFTP writes: syscalls per round **64 → 1–2** |
 | 2 | **Large-block receive** | PipeReader reads in 64 KiB, replacing a fixed 4 KiB | 32 KiB packets: reads **8 → 1** |
-| 3 | **Adaptive channel window** | Ran low and the reader was starved → ×2, 3 rounds without running low → ×0.75, `[256 KiB, 64 MiB]`; no RTT / BDP estimate (§5.5) | SFTP over a 200 ms RTT link: **~10 MB/s → near the bandwidth ceiling** |
+| 3 | **Adaptive channel window** | Tight (ran low or sat idle for credit) and the reader was starved → ×2, 3 rounds without being tight → ×0.75, `[256 KiB, 64 MiB]`; no RTT / BDP estimate (§5.5) | SFTP over a 200 ms RTT link: **~10 MB/s → near the bandwidth ceiling** |
 | 4 | **Adaptive SFTP pipeline** | Block size from `limits@openssh.com`; depth scaled by how often requests wait for an in-flight slot (starts at 64, capped at 256) instead of a hard-coded 64×32 KB (§5.8) | Markedly higher throughput on high-latency links; small servers no longer get flooded |
 | 5 | **Zero-copy read path** | `PipeReader` hands over a `ReadOnlySequence<byte>` that consumers can parse directly | Removes the Sequence→Memory copy (one per packet) |
 | 6 | **Default cipher order by hardware** | With AES-NI / ARM Crypto extensions AES-GCM comes first, without them chacha20-poly1305 comes first (`SshAlgorithmSet.Default`); ChaCha20 and Poly1305 come from BouncyCastle's `ChaChaEngine` / `Poly1305`, not hand-written, with the engines kept resident and only the nonce changed per packet (§11.2.22) | Devices without AES hardware acceleration (some ARM) don't fall into software AES, which is an order of magnitude slower |
@@ -2460,6 +2463,7 @@ and a half-transferred file or half-run command output is handed out as a comple
 | With a pile of tunnel connections and SFTP sending at once, the normal queue holds one frame per channel, and a terminal keystroke queued behind them: with a 2 MiB backlog on a 5 Mbit/s uplink a keystroke waited over 3 seconds | Interactive channels (those opened by `OpenShellAsync`) use an interactive lane, and after window top-ups the send pump takes turns between it and the normal queue: a keystroke waits for at most one frame, and a large paste does not starve the normal queue; all of a channel's frames use the same lane, so its own order is unchanged (`spec/05` §3.2, Q7) |
 | Keep-alive probes waited on backpressure, or started their clock only once on the wire: a dead link typically looks exactly like the send pump stuck on one write, so the probe got stuck too, and the connection could not be declared dead precisely when it mattered most | Probes bypass backpressure, and their deadline starts when they are enqueued; at most one frame per interval, so this is not unbounded (`spec/05` §6.3) |
 | The adaptive window looked only at "ran low": a slow consumer pushed the window all the way to the maximum, piling up tens of MiB of unread data locally | Grow only when it ran low **and** the reader was recently starved; shrink after 3 rounds without running low (`spec/05` §3.3, §5.5 here) |
+| With a window of several packets and data trickling in at the link's bandwidth, "ran low" is invisible: the top-up goes out at half a window, and during the round trip in which the peer waits for that credit our books already count it; the window stayed at 256 KiB, SSH over Docker's port forwarding reached only 30 MB/s, and a full-window animation over X11 forwarding ran at 9 frames per second | Besides "ran low", "sat idle" counts: the longest wait for the next packet after draining everything takes at least 1/4 of the last two rounds (waiting for bandwidth gives only "packet / window"); used only with windows of 4 packets or more (`spec/05` §3.3, §11.2.31 here) |
 | On a peer channel open, the receive loop awaited the user's handler in place (it may show a prompt or look up configuration): a slow handler stalled receiving for every channel on the connection | Parsing and handler lookup finish on the receive loop; "ask the handler, create the channel, confirm" runs in the background; at most 64 are being decided at once, and the excess is refused with `RESOURCE_SHORTAGE` (`spec/05` §8.1) |
 
 #### Performance: allocations on the hot path
@@ -2722,6 +2726,24 @@ and the round-trip tests could not catch it.
 Verification: a new test builds a fixed-Huffman stream by hand per RFC 1951, aligning the distance code of the last match with the packet's last byte; it fails before the fix.
 Another makes the decompressed length an exact multiple of the output chunk, or exactly the limit. The reproduction program (built-in X Server + the library's X11 forwarding + sshd and gnome-calculator in a container)
 dropped two runs out of three before the fix and none out of four after it.
+
+### 11.2.31 The adaptive window counts "sat idle": it grows even when data trickles in (2026-10-12)
+
+Trigger: looking into the frame rate of the built-in X Server over SSH X11 forwarding. The same full-window animation (1280×720, a full PutImage then XSync per frame) ran at 342 frames per second over a direct Docker connection,
+but at 9 over the library's X11 forwarding (sshd in local Docker, no added latency, no compression). The raw throughput of a session channel (remote `head -c`): 29–59 MB/s with the adaptive window,
+which stayed at 256 KiB the whole time; 190 MB/s fixed at 2 MiB, 675 MB/s fixed at 8 MiB — throughput was capped at window / RTT, and Docker Desktop's port forwarding has an effective round trip of about 8 ms.
+
+| Problem | Decision |
+| --- | --- |
+| "Ran low" (≤ 1/8 left) is only visible when the window is one or two packets, or when a whole window of data arrives at once. With a window of 8 packets and data arriving one packet at a time at the link's bandwidth, the top-up goes out at half a window: during the round trip in which the peer waits for that credit, our books already count it, so the remaining window bottoms out around one half | Besides "ran low", "sat idle" counts: if the reader's longest wait for the next packet after draining everything takes at least 1/4 of the last two rounds (from the top-up before last to this one), the window was tight. Waiting for credit makes data arrive in batches separated by nearly a round trip; waiting for bandwidth makes it arrive evenly, the longest gap being one packet's transmission time, only "packet / window" of two rounds (1/8 at 256 KiB). Below 4 packets of window only "ran low" counts; after growing once, the previous round's wait is discarded so one gap never grows the window twice ([`spec/05`](../spec/05-connection.md) §3.3) |
+
+Pauses of the sender itself (a remote X program between two frames) are also recorded as idle waits, so the window grows somewhat larger. That is harmless: the other condition for growing is a reader that keeps up, so unread data cannot pile up; the ceiling is still `max` and the session budget.
+No RTT estimate was introduced: judging idle waits needs only the rhythm of arrivals, not the length of the round trip.
+
+Verification: the existing window tests used a window of a single packet (32 KiB), which hits zero with every packet, so they could not catch this. The link simulation gained a bandwidth-only data direction (a `DelayedStream` on the server side),
+and two tests were added: with a 256 KiB window, 20 ms round trip and 40 MB/s (bandwidth-delay product 800 KB) the window must grow — before the fix it stayed at 256 KiB;
+with a 1 ms round trip and 2 MB/s (bandwidth-delay product 2 KB) it must not. Over the library's X11 forwarding the same full-window animation went from 9 to 64 frames per second and glxgears (1280×720) from 9 to 61,
+the same as with the window fixed at 8 MiB (host repository `scripts/xserver/perf/perf.cs --ssh`).
 
 ### 11.3 Switch-over strategy with VelaShell
 
