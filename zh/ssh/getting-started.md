@@ -25,6 +25,9 @@ await using SshConnection conn = await SshConnection.ConnectAsync(options, ct);
 `SshConnection.ConnectAsync` 一口气做完拨号 → 版本交换 → 密钥交换 → **主机密钥裁决** → 认证，
 交回来的连接已经可用 —— `SshConnection` 没有公开的构造函数，也没有要另外调的 `Start`，建连只有这一个入口。
 
+目标串写成 `user@host:port`，端口与用户名都可省（端口默认 22，用户名默认本机登录名）。IPv6 带端口要加方括号（`joe@[2001:db8::1]:2222`）；
+不带方括号的 IPv6（`joe@2001:db8::1`）整段是地址、端口取 22 —— 冒号分不清哪段是端口时不猜。
+
 **三把计时器是分开的**，这不是小事：
 
 | 计时器 | 默认 | 管什么 |

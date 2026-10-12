@@ -42,6 +42,9 @@ Three details that are easy to miss:
   secret really is `-Abc123`. Whether the next token is an option is decided by its **name** (including `-e` / `-s`,
   which we deliberately do not implement), not by a leading dash.
 - **IPv6 zone ids work**: `ssh://root@[fe80::1%25eth0]:2222`, unescaped back to `fe80::1%eth0` per RFC 6874.
+- **An unbracketed IPv6 address is the whole host** (#611): `ssh://root@2001:db8::1` connects to the default port of `2001:db8::1`; to give
+  an IPv6 address a port, bracket it (`[2001:db8::1]:2222`) or use `-p`. It used to be split at the last colon — when the last group was all
+  digits (`2001:db8:0:1::10:20`) it was taken as the port, with no error, and the connection went somewhere else.
 - Host names keep their case; schemes are lower-cased.
 
 Supported schemes: `ssh`, `sftp`, `ftp`, `ftps`. `telnet` / `rlogin` are recognised and reported as unsupported —
