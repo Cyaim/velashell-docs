@@ -27,6 +27,10 @@ await using SshConnection conn = await SshConnection.ConnectAsync(options, ct);
 `SshConnection.ConnectAsync` does dialing → version exchange → key exchange → **host key decision** → authentication in one go,
 and the connection it returns is ready to use — `SshConnection` has no public constructor and no separate `Start` to call; this is the only way to connect.
 
+The target string is `user@host:port`; the port and user are optional (port 22, and the local login name). An IPv6 address with a port needs
+brackets (`joe@[2001:db8::1]:2222`); an unbracketed IPv6 address (`joe@2001:db8::1`) is taken whole, with port 22 — when the colons cannot tell
+which part is the port, the library does not guess.
+
 **The three timers are separate**, and this is no small thing:
 
 | Timer | Default | What it covers |

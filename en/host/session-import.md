@@ -274,7 +274,7 @@ The exported CSV doubles as the template; the header is always:
 | `name` | display name | the host |
 | `group` | group name | ungrouped |
 | `protocol` | `ssh` / `sftp` / `ftp` (auto) / `ftp-plain` / `ftps` (explicit) / `ftps-implicit` / `plugin:<protocol id>` (an id with a dot may drop the `plugin:`) | `ssh` |
-| `host` | host name or IP, **the only required column**. `user@host:port` and `[v6]:port` are split too, but only when the matching column is empty; a bare IPv6 address is not split. A user name / port split this way also applies when overwriting an existing connection (even without those columns) | the row is an error |
+| `host` | host name or IP, **the only required column**. `user@host:port` and `[v6]:port` are split too, but only when the matching column is empty; a bare IPv6 address is not split, and a `[v6]` without a port just loses its brackets (profiles store the bare address). A user name / port split this way also applies when overwriting an existing connection (even without those columns) | the row is an error |
 | `port` | 1–65535 | SSH / SFTP 22, FTP 21 (implicit FTPS 990); required for plugin protocols |
 | `username` | user name | asked when connecting |
 | `auth` | `password` / `key` / `certificate` / `agent` | certificate if one is given, key if a key is given, password otherwise. Always written on export (even when a shared credential is referenced), so a connection whose credential cannot be matched still comes back with its original method |

@@ -811,6 +811,12 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
 - **The General page** is split into sections, each headed by a 10px `text-tertiary` title followed by a hairline:
   - **Destination**: the Host / Port row, then the jump host (its explanation lives in the ⓘ tooltip next to the label —
     the jump host decides whether you can connect at all, so it stays on General rather than on some other page).
+    - **IPv6** (#611): type the bare address into Host (`2001:db8::1`, or `fe80::1%en0` with a zone id). A `[2001:db8::1]` or
+      `[2001:db8::1]:2222` pasted from elsewhere works too — Save and Test drop the brackets, and the port after them replaces the Port
+      field (the footer preview shows exactly that). Malformed brackets (unclosed, or not followed by `:port`) get a hint under the field
+      and the three buttons stay disabled. Profiles store only the bare address: with brackets it would go to the server verbatim through
+      a jump host, and its host keys would be recorded as a different machine from the bare address. Everywhere `host:port` is shown,
+      IPv6 is bracketed.
   - **Authentication** (hidden entirely for protocols declaring `NoCredentials`): username + an authentication
     **segmented control** (Password / Key / Certificate / Agent, in `AuthMethod` enum order — all four visible at once,
     replacing the dropdown); FTP puts its encryption mode in that slot, plugin protocols leave it empty.
