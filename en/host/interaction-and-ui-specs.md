@@ -702,6 +702,8 @@ for work the host cannot see.
 - Avoid screen boundaries when positioning the panel. Flip left/up near the right/bottom edge.
 - If the session is disconnected, show a “Data unavailable” placeholder.
 
+**GPU measurement semantics**: NVIDIA uses `nvidia-smi` and AMD uses DRM sysfs. Intel `i915` / `xe` first reads the DRM client cumulative engine time and resident memory from `/proc/<pid>/fdinfo`. Intel integrated graphics has no dedicated VRAM; the panel labels this as “Memory” and uses total system memory as the denominator. A non-root user can see only clients they are permitted to read, so this must not be presented as whole-device utilization. Missing permissions or driver interfaces show “unavailable”, never a fabricated 0%.
+
 ---
 
 ## 12. Session Context Menu (`e6klM`)
