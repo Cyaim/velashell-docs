@@ -649,6 +649,9 @@ for work the host cannot see.
 1. **Draggable**: hold the header to move freely within the main window. Remember the position for the next appearance and keep it within the visible window bounds.
 2. **Automatic appearance**: when a new transfer starts, fade in from the upper-right if the panel does not exist.
 3. **Real-time progress**: stack multiple tasks vertically; the badge count equals the number of active tasks.
+   - **SFTP uploads** count bytes from the continuous-confirmation waterline (`DurableLength`) after each `WRITE` receives `STATUS OK`, not bytes merely enqueued into the pipeline. While `Flush` drains in-flight writes, sample every 200 ms and throttle UI reports to 100 ms. Force an update when confirmed bytes reach the total, but **100% is not `Completed`**: completion still waits for optional `fsync` and successful `CLOSE`; a failure during finalization remains a failure.
+   - For **resumed SFTP uploads/downloads**, the percentage includes the verified prefix. Speed is `(cumulative transferred bytes − verified prefix) / elapsed time since verification`, still the **whole-transfer average for this attempt**, not an instantaneous rate; neither the existing prefix nor verification time contributes.
+   - **Sub-byte rates** (`0 < rate < 1 B/s`) must format safely as `B/s`; they must never index outside the units array and block UI updates.
 4. **Automatic disappearance**: **when all transfer tasks complete, or all are canceled/failed and acknowledged, the panel disappears automatically**. After all tasks complete, it is recommended to remain for about 3 seconds showing the “Complete” state before fading out. If a new task is added during that period, reset the timer.
 5. Mark failed tasks in red and show “Retry”. Clicking `x` manually only collapses the panel; tasks continue in the background and can be reopened from the status bar or command palette.
 
