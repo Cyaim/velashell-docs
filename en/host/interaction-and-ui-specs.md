@@ -763,7 +763,7 @@ Opened from "Batch edit…" in the multi-select menu (540 wide, the same shell a
 | --- | --- |
 | Username | prefilled when all selected connections share one, empty otherwise |
 | Port | 1–65535; prefilled when shared, 22 otherwise |
-| Authentication | segmented: shared credential (pick one, #550) / password (may be left empty to be asked when connecting) / key (file + optional passphrase) / agent. FTP and plugin protocols only take passwords; those rows are skipped for anything else |
+| Authentication | full-width segments below the heading: shared credential (pick one, #550) / password (may be left empty to be asked when connecting) / key (file + optional passphrase) / agent / Tailscale SSH. FTP and plugin protocols only take passwords; those rows are skipped for anything else |
 | Jump host | direct, or one of this computer's SSH / SFTP connections (excluding the ones being edited); only applies to SSH / SFTP, and the whole batch is skipped if it would close a loop |
 
 The group is not here: "Move to Group" in the multi-select menu is how the group changes, and it carries the "delete the group
@@ -834,13 +834,10 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       and the three buttons stay disabled. Profiles store only the bare address: with brackets it would go to the server verbatim through
       a jump host, and its host keys would be recorded as a different machine from the bare address. Everywhere `host:port` is shown,
       IPv6 is bracketed.
-  - **Authentication** (hidden entirely for protocols declaring `NoCredentials`): username + an authentication
-    **segmented control** (Password / Key / Certificate / Agent, in `AuthMethod` enum order — all four visible at once,
-    replacing the dropdown); FTP puts its encryption mode in that slot, plugin protocols leave it empty.
+  - **Authentication** (hidden for protocols declaring `NoCredentials`): a full-width single-row segmented control below the username (Password / Key / Certificate / Agent / Tailscale SSH, in `AuthMethod` enum order). FTP keeps its encryption mode to the right of the username; plugin protocols leave that slot empty.
     Below come FTP's anonymous login / passive mode, the plaintext-FTP warning, the password or certificate + private
     key + passphrase, the Agent explanation, and remember password.
-  - **Credential source** (#550, since 2026-10-03; the first row of the Authentication section; hidden for anonymous FTP
-    and for protocols without credentials): a dropdown whose first item is “Enter in this connection”, followed by every
+  - **Credential source** (#550, since 2026-10-03; first row of Authentication; hidden for anonymous FTP, credential-less protocols and Tailscale SSH): a dropdown whose first item is “Enter in this connection”, followed by every
     shared credential (“name (username)”); next to it a “New…” outline button that carries the username and password /
     private key already in the form into the shared-credential editor (without the “Connections using this credential”
     list) and selects the new credential once it is created.
@@ -1055,8 +1052,7 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       version implements but has not enabled, the message names them and points here (“Allow legacy algorithms” or the
       custom lists); when there are none, it says plainly that enabling more will not help (typically an old device
       that only speaks CBC).
-  - **Authentication method “Agent”** (`AuthMethod.Agent`, the last segment of the segmented control — the enum is persisted by
-    ordinal, so new values can only be appended): signs with the keys in the local ssh-agent and **stores no
+  - **Authentication method “Agent”** (`AuthMethod.Agent=3`; the enum is persisted by ordinal, so new values can only be appended): signs with the keys in the local ssh-agent and **stores no
     credentials** in the profile; selecting it collapses the password and key fields, leaving one muted line saying
     where the agent comes from. On Windows that is the named pipe of the “OpenSSH Authentication Agent” service;
     `SSH_AUTH_SOCK` is honored only when it is itself a `\\.\pipe\…` path (1Password and KeePassXC set it that way) and
@@ -1068,6 +1064,11 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       all the user would see is a spinner until the whole connection times out. An agent with no keys gets its own
       message (“load one first with ssh-add”) instead of a generic “authentication methods exhausted”.
     - **The agent is only touched when this method is explicitly chosen**; no other method falls back to it implicitly.
+  - **Tailscale SSH** (`AuthMethod.Tailscale=4`): uses the system's signed-in Tailscale network. Enter a MagicDNS name or tailnet IP, normally port 22, and the remote system username. Existing host-key, proxy and jump-host policy still applies; no SSH password, key, certificate, agent or keyboard-interactive credential is prepared. Switching, saving and importing clears old secrets, shared references and Remember password. A hidden shared credential cannot supply the username, and this method cannot be a shared credential.
+    - `accept` / `check` are server authorization policy, not client configuration. Every actual handshake uses the current server response; panel changes work with one profile and one running application. No approval, checkPeriod or link cache and no management API polling.
+    - Without a challenge, continue directly (including a valid checkPeriod). A USERAUTH_BANNER containing an allowed official HTTPS link opens one owned, modeless window per actual authentication hop. The browser opens only on a user click; the URL is selectable/copyable. Showing/updating never waits for the window to close, and there is no “I have verified” button.
+    - A new URL updates the existing window. SUCCESS continues the original connection and closes it even without a browser click. Cancel/Esc/close cancels only this attempt; rejection/timeouts report the failing hop safely, with no target-password fallback. Verification links never enter ordinary banners, logs, exception chains, history or saved configuration.
+    - A fresh automatic-reconnect challenge or authorization failure pauses background terminal/tunnel recovery. Explicit reconnect/start remains allowed and successful authentication clears the pause. The server decides whether established SSH/SFTP/tunnels survive. No guarantee is made that a plain mode switch releases a pending check or terminates an established connection. Real policy propagation/revocation needs a dedicated-node acceptance run; protocol regressions are not real Tailscale policy validation.
   - **FTP's Advanced page: “Default remote path”** (`FtpSettings.InitialRemotePath`, shown only
     when `FTP` is selected in the rail). After connecting, the remote pane opens that directory instead of the login working directory —
     the upload target is the same `/var/www/html` or `/pub/incoming` year after year, while the login directory an FTP
@@ -1094,8 +1095,8 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
 
 ### 13.2 Password Verification Dialog (Two Steps)
 
-- **Step 1 (`oNZIM`, 420px)**: header title + session information bar (`bg-input`: host icon + `user@host`) + password input with visibility toggle + “Remember password” checkbox + `Cancel`/`Connect` footer.
-- **Step 2 (`twD13`)**: second-factor verification (2FA / OTP / key passphrase / host fingerprint verification). Information bar + input + `Previous`/`Verify`.
+- **Step 1 (`oNZIM`, window 520 DIP)**: username input, target and known-host fingerprint; `Cancel` / `Next`.
+- **Step 2 (`twD13`)**: full-width Password / Certificate / Key / Tailscale SSH segments and their material; `Previous` / `Login`. UI indexes are explicitly mapped to the enum. Tailscale requires only a username and never requests secrets, remembers a password or updates a shared credential. OTP and host-key decisions are separate interactions.
 - **One-time code dialog (keyboard-interactive, since 2026-09-29, `KeyboardInteractivePromptDialog`)**: shown when a
   two-step verification server that only allows keyboard-interactive (PAM + TOTP, Duo, bastion MFA) asks for a code.
   - **When it appears**: a single non-echoed prompt that looks like a password prompt (the word "password" in English,

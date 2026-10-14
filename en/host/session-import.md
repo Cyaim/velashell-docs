@@ -277,16 +277,15 @@ The exported CSV doubles as the template; the header is always:
 | `host` | host name or IP, **the only required column**. `user@host:port` and `[v6]:port` are split too, but only when the matching column is empty; a bare IPv6 address is not split, and a `[v6]` without a port just loses its brackets (profiles store the bare address). A user name / port split this way also applies when overwriting an existing connection (even without those columns) | the row is an error |
 | `port` | 1–65535 | SSH / SFTP 22, FTP 21 (implicit FTPS 990); required for plugin protocols |
 | `username` | user name | asked when connecting |
-| `auth` | `password` / `key` / `certificate` / `agent` | certificate if one is given, key if a key is given, password otherwise. Always written on export (even when a shared credential is referenced), so a connection whose credential cannot be matched still comes back with its original method |
+| `auth` | `password` / `key` / `certificate` / `agent` / `tailscale` | certificate if one is given, key if a key is given, password otherwise. Always written on export (even when a shared credential is referenced), so a connection whose credential cannot be matched still comes back with its original method |
 | `password` | password, not trimmed (always empty on export) | not stored |
 | `private_key` / `certificate` | file path, not checked for existence | — |
-| `credential` | shared credential name or id; when set, the connection references it and the `auth` columns do not count. When the name is not unique locally, the one the duplicate local connection already references is used; otherwise none | its own authentication |
+| `credential` | shared credential name or id; when set, the connection references it and the `auth` columns do not count, **except that `auth=tailscale` takes precedence and ignores this reference**. When the name is not unique locally, the one the duplicate local connection already references is used; otherwise none | its own authentication |
 | `jump_host` | jump host: another connection's name or id. Looked up in the file first, then on this computer; when the name is not unique locally, the one the duplicate local connection already jumps through is used, otherwise none (direct rather than wrong) | direct |
 | `tags` | separated by semicolons (`,` and `\|` work too) | — |
 | `notes` | notes, may span lines (wrap the cell in double quotes) | — |
 
-Rows that give an FTP or plugin connection key / certificate / agent authentication are errors (those protocols
-only take passwords). Reading is as forgiving as it can be:
+Rows that give an FTP or plugin connection key / certificate / agent / Tailscale SSH authentication are errors (those protocols only take passwords). Tailscale profiles clear old passwords, keys, passphrases, certificates, shared references and Remember password. JSON writes `"authMethod":"tailscale"` and accepts numeric `4`; even encrypted exports omit old SSH secrets. Overwriting clears material after merging and skips shared-reference resolution before it can fail, while preserving jump hosts and other settings. Reading is as forgiving as it can be:
 
 - The delimiter is detected from the header row: comma, semicolon or tab (German-locale Excel saves semicolons,
   and cells copied out of a spreadsheet are tab-separated)
