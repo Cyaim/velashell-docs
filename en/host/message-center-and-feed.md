@@ -82,6 +82,16 @@ available if the browser cannot start. The releases list includes prereleases fo
 Startup checks still only post a notification and never open the browser automatically.
 The Windows and macOS update flows are unchanged.
 
+**Download progress carries a speed (from 2026-10-14)**: while an update package is downloaded in-app on
+Windows / macOS, the About page's status line shows `percentage · downloaded/total · current speed`. The speed
+is measured over a sliding 3-second window (`DownloadRateMeter`) rather than averaged over the whole transfer —
+when the network is fast early and slow later, the overall average explains neither "it's slow now" nor "it was
+fast before". The download thread only reports when new bytes arrive, so the UI also runs a 500 ms heartbeat
+(`UpdateDownloadTracker.Tick`) that refreshes between reports: after the 1-second speed freshness window the
+speed is zeroed rather than leaving a stale number on screen, and 10 seconds without a single new byte is
+treated as a stall, switching the status line to a message that says so. The progress channel's type changes
+from `IProgress<int>` to `IProgress<UpdateDownloadProgress>` (bytes downloaded, total bytes, speed).
+
 ## 3. Feed contract (what the backend publishes)
 
 > **An official implementation now exists**: [velashell-feeds](https://github.com/VelaShellLabs/velashell-feeds),
