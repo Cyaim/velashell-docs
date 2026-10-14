@@ -56,7 +56,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 |---|---|---|
 | Editable path input | ❌ None | Both sides have only breadcrumbs, so a path cannot be pasted directly for navigation. **High-frequency basic need** |
 | Forward/back history | ❌ None | Neither VM has a history stack |
-| Bookmarks/favorites | ❌ None | WinSCP users rely on this heavily |
+| Bookmarks/favorites | ✅ Implemented (2026-10-14) | A bookmark entry on the dual-pane document toolbar stores a local-directory ↔ remote-directory pair per connection, with add, apply, edit, delete, and persistence; remote ↔ remote pairs and access history are not included |
 | Directory history dropdown | ❌ None | |
 | Breadcrumbs | ✅ Implemented on both sides | |
 | Hidden-file toggle | ⚠️ Remote only | The local pane always shows hidden files and has no toggle |
