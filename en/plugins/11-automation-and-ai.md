@@ -52,6 +52,44 @@ notifications, open sessions, write to the terminal (highly sensitive), and run
 local programs (highly sensitive, explicit path). This makes lightweight
 automation available without plugins, while plugins handle the long tail.
 
+### 1.4 Managed execution and recovery in the AI plugin (SDK 2.1.0)
+
+This records added AI-plugin source behavior, separately from the rule engine above and the future host AI gateway below. It does not declare a gateway or universal permission system implemented.
+
+**Managed commands** live only while the application runs, without disconnect/restart recovery:
+
+| Tool | Parameters and behavior |
+| --- | --- |
+| `run_command` | `timeoutSeconds=0` means no execution deadline by default (explicit values capped at 86400); `waitSeconds=2`, maximum 10, is only a short wait window: expiry returns running/taskId, not termination; `monitoring=false`; `elevated=false` |
+| `run_on_sessions` | Up to 16 targets queue for four shared stream slots; cancelled unstarted items do not start or collide directly with the host concurrency limit |
+| `task_status` | `taskId`, `cursor=0`: state and incremental output |
+| `task_wait` | `taskId`, `waitSeconds=2`, maximum 30, `cursor=0`; waiting expiry is neither an execution deadline nor cancellation |
+| `task_cancel` | Requests cancellation of this run's task; cleanup is not blocked by revoked read scope |
+
+States are Starting / AwaitingUser / Running / Succeeded / Failed / Cancelled / TimedOut / Unknown. Ordinary results preserve stdout, stderr, exit code and timeout/truncation information. Sudo output is `combined`, preserving raw newline/CR fragments without pretending to provide stderr. Cancellation after starting, without confirmed remote termination, is Unknown with `cancellationRequested=true` and `remoteStopConfirmed=false`; cancellation before opening the stream is Cancelled with confirmation it never started. SSH disconnect or sudo Exited without an exit code is Unknown. TimedOut after starting without stop confirmation also blocks further automatic tool side effects in that run; the framework never replays it. Authentication cancellation/failure/unsupported explicitly means the user command did not start, without ordinary fallback.
+
+Each run allows 128 tasks. Output uses a thread-safe bounded queue (32K characters, 256 entries, at most 4096 characters per entry); `NextCursor` / `EarliestCursor` / `OutputTruncated` identify expired or truncated output. taskId is readable only in its creating run scope, bound to entry point/conversation/fixed sessionId, not shared across chats or MCP clients. Session scope is rechecked at start, query and completion; see [Security §1.1](12-security-threat-model.md#11-actual-boundaries-of-this-sudo-and-managed-ai-execution-change-sdk-210) for cache/revocation limitations.
+
+Commands must remain foreground processes in the managed channel. Arbitrary shell `&`, nohup or daemonize is not parsed/rewritten; independently detached processes are not monitored, and parent exit does not prove completion. Explicit `monitoring=true` infinite logs wait locally for exit or Stop without auto-waking/polling the model.
+
+**Elevation has two explicit approval layers.** `elevated=true` takes the actual command without sudo; root scope includes all pipelines and redirections. Plugin Ask/ReadOnlyAuto uses distinct approval with no first-word approval memory. Bypass skips only the plugin card, never trusted host confirmation on each call, including NOPASSWD. MCP without a Handler rejects Ask/ReadOnlyAuto; Bypass may request desktop confirmation. Passwords never pass through the plugin or model. This is not terminal autofill; see [Capability APIs §3](07-capability-apis.md#3-velaremoteexec-remote-execution-s5s6).
+
+**Rejection is a run-level stop boundary.** Plugin approval returning false/missing a Handler, or host AuthenticationCancelled (including root confirmation refusal/password cancellation), marks the current run denied. Before model requests, tool calls and background terminal continuation, guards force an `ExecutionDenied` pause with localized desktop/Bridge feedback, rather than relying on the model obeying a “do not retry” string. A new desktop/Bridge user turn creates a new run; the denied run cannot continue side effects. MCP instead creates a fixed scope per client McpToolHost. Once denied, that host rejects subsequent tools except `task_cancel` cleanup. Another HTTP/tool call does not reset it: a new host/session or reconnection/authorization-configuration refresh must provide a new scope.
+
+**Recover model steps, not whole side-effecting turns.** Desktop chat and Bridge share a per-conversation serial coordinator. The runId + CallId ledger reuses in-flight/completed results for the same id and arguments, pauses on the same id with different arguments, and does not deduplicate all identical commands under different ids. Tool frames are released only after a complete ToolCalls step with validated complete arguments; incomplete calls/reasoning are not replayed. Complete model steps and paired tool results form checkpoints. Partial prose is retained with an explicit localized continuation boundary, without promising unprovable seamless deduplication.
+
+Transient network/429/appropriate 5xx failures get at most two recoveries per step (default 400/800ms, respecting available Retry-After; values above 120 seconds pause). Every actual request passes Steering account/credential revalidation; cancellation, rejection and deterministic errors are not retried. UI 25-step and Bridge 20-step limits are explicit batch boundaries. Current fixed total budgets are 100 model steps, 200000 tokens and eight batches, not user-configurable settings or a separate priced-cost cap. No progress, repeated calls or exhausted budgets pause explicitly rather than continuing forever.
+
+Finite background job completion locally wakes its owning conversation and adds a new terminal notification to model context, never a second tool result for the original CallId. Local waiting does not request the model and has no default ten-minute waiting deadline; Bridge does not enlarge existing authorization or total timeouts. Stop, entry-point detach/destruction, plugin unload, MCP session deletion/expiry/settings reload and Bridge authorization reload cancel old runs, asynchronously clean up and discard late wakeups. Switching chats does not inject results into another conversation. MCP exposes task query/wait/cancel only; automatic continuation of an external model belongs to the MCP client.
+
+**Release and verification status:**
+
+- SDK 2.1.0 is officially published and restored from NuGet.org. `src/tests` central packages and the explicit AI reference are upgraded; the AI manifest uses `minSdkVersion: 2.1.0`, `apiLevel: 2`. The old missing-type blocker is resolved without local packages or temporary feeds.
+- Execution RPC, Capability and AI sudo parameterized regressions against the official SDK assembly have passed. Platform/environment skips and `[SKIP]` early returns in the Infrastructure suite remain unverified; reported passes are not all actual execution. Host sudo-dialog and related localization/HeadlessDispatch/DialogButtonStyle gates have passed; this is not the full UI suite. Final all-AI, SSH and strict-build results after the latest rejection-guard fix are still being consolidated; older checkpoints do not validate new changes.
+- Ubuntu 24.04.5 LTS (sudo 1.9.15p5) and Debian 12 bookworm (sudo 1.9.13p3) each passed the complete sudo matrix against real sshd/PTY/PAM: UTF-8/requiretty, confirmation with NOPASSWD, wrong-password retries/limit, cancellation, restricted sudoers, fake prompts/closed stdin, disconnect Unknown, a long foreground command followed by the next command, explicit root and external cancellation. Payload tapping simultaneously checked secret non-disclosure. Earlier apt-readiness and refusal-misclassification failures are retained and were rerun after correction, not current blockers.
+- Real tests validate the execution kernel, not a complete human-operated GUI → plugin IPC → remote flow. In-memory fragmented/EOF state-machine and host-layer regressions are separate evidence. Complex PAM/OTP is unsupported; combined authentication-timeout/late-lease dynamic acceptance must not be inferred from existing cases.
+- Before delivery, complete official-package builds, rejection-stop regressions and host UI/IPC checks against the same final source, retaining platform/environment coverage limits. Global version banners remain release-script-managed rather than manually rewritten.
+
 ## 2. AI Gateway (S3, Longer-Term Mainline)
 
 ### 2.1 Why a "Gateway" Instead of Giving Every Plugin Its Own Model SDK

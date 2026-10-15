@@ -424,7 +424,7 @@ readonly ref struct PacketTapRecord
 
 Hooked up through `SshConnectionOptions.PacketTap`. Each hop on a jump chain is its own connection; to watch a hop, set it in that hop's connection options.
 
-**Three hard rules**:
+**Four hard rules**:
 
 1. **Disabled by default.** When `PacketTap` is `null` (the default), the send and receive paths pay one null check.
 2. **The payload is not provided by default.** Providing it requires explicitly setting `SshConnectionOptions.AllowPacketTapPayload = true`,
@@ -434,6 +434,36 @@ Hooked up through `SshConnectionOptions.PacketTap`. Each hop on a jump chain is 
    the tap sees metadata only.
    〔Decision〕There is no switch for this — no troubleshooting scenario is worth logging a password,
    and if a switch exists, someone will certainly turn it on in production.
+4. **While a sensitive-interaction lease is held, no payload is exposed in either direction on the entire connection**, even with `AllowPacketTapPayload` enabled.
+   Passwords entered after SSH login (such as controlled sudo authentication) travel as ordinary channel data, outside the protection of messages 50–79; rule 3 is not a substitute for this rule.
+
+### 9.1 Connection-wide payload-suppression leases for sensitive interactions
+
+〔Specification first; downstream dedicated contract: **SDK 2.1.0**〕The following defines required behavior. The SSH library is not separately packaged. The downstream sudo executor has been verified against real SSH/PTY/PAM on Ubuntu/Debian; this is not acceptance of a complete real GUI-and-plugin-IPC end-to-end flow.
+
+A caller acquires a **payload-suppression lease** on an SSH connection successfully before any channel request, prompt, input or output that may start the sensitive interaction.
+The lease only restricts diagnostic visibility: it does not change SSH packets, channel contents, remote execution or normal application reads, and it does not authorize commands or authenticate on the caller's behalf.
+
+- **Connection scope and reference counting.** Each lease belongs to the connection on which it was acquired. While any lease remains active, `Payload` is empty for every channel, both directions and rekey packets on that connection.
+  Sensitive executions may overlap; the first to finish must not remove protection for another. Releasing the same lease again is harmless and must not decrement twice or underflow the count.
+  A boolean switch that concurrent operations can overwrite is not a substitute for leases. Other connections are unaffected; each hop of a jump chain remains a separate connection.
+- **Metadata only.** The tap still receives direction, message number, original payload length, sequence number and the channel number where already available; byte and packet counters continue normally.
+  Payload must not reappear as a digest, prefix, encoded text or extra field. Authentication prompts, one-time markers, passwords and possible peer echoes are all suppressed; hiding only the outbound password line is insufficient.
+- **Cover asynchronous teardown.** The caller holds the lease through sensitive channel creation, authentication, execution, cancellation and asynchronous close. A completed password write, successful authentication, cancellation request or received exit status is not sufficient to release it early.
+  Protection may end only once the channel's in-flight sends, receives and close handling have finished and can no longer deliver that execution's payload to the tap, or the entire connection has ended diagnostic delivery.
+  Failure, timeout, user rejection, disconnect and disposal all follow the same teardown discipline: exceptions must not leak leases, and early clearing must not expose late data.
+- **Concurrency safety and explicit boundaries.** Acquisition, release, taps in both directions and connection disposal may run concurrently. Tap deliveries beginning after a lease has been successfully acquired must observe suppression.
+  Payload already delivered before acquisition cannot be recalled, so the lease must precede sensitive work. Races between lease release and connection close must not restore payload while another lease is active,
+  deadlock, or change the rule that a tap exception cannot break the connection. A closed connection cannot successfully start new sensitive work; releasing outstanding leases remains safe and idempotent.
+- **Do not change user settings.** Leases do not modify or persist `PacketTap` / `AllowPacketTapPayload`, nor blindly restore a stale saved value on release.
+  Once the last lease ends, non-authentication payload visibility follows the connection's existing configuration; authentication packets still expose metadata only. A connection that did not enable payloads must not enable them when a lease ends.
+
+〔Acceptance boundary〕With payload tapping explicitly enabled and multiple concurrent channels, verify both directions, overlapping leases, repeated release, late data after cancellation/failure and races with connection disposal;
+verify preserved metadata, unaffected other connections, and restoration only of visibility permitted by the original configuration after the final lease ends.
+〔Implementation teardown〕Local Dispose returning does not prove that the peer has stopped delivering data. Release only after peer CLOSE and the send pump finish, or the connection ends diagnostic delivery.
+If channel opening fails without a trackable channel, or draining fails, conservatively retain suppression until connection termination. This may extend suppression for other channels on the same connection: an explicit confidentiality-first trade-off.
+A lease protects the library's diagnostic tap, not automatic redaction of application output: callers must still separate sensitive authentication content from normal command output and keep passwords, authentication markers and raw authentication content out of plugins, models, IPC, history and logs.
+This does not detect arbitrary terminal password prompts or autofill credentials, and does not change existing credential-interaction decisions for the user's terminal.
 
 〔Implementation〕The tap sits at the two points where the framing layer sends and receives: inbound packets after decryption and decompression, outbound ones before compression and encryption — the tap sees the plaintext payload layer,
 and the sequence number is that packet's number in its direction (reset by every `NEWKEYS` under strict KEX, see [`03-key-exchange.md`](03-key-exchange.md) §6).

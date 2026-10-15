@@ -90,6 +90,21 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 | `RemoteTunnel` (`IRemoteTunnelApi`) | `OpenUnixSocketAsync` / `OpenTcpAsync`                                           | 到远端端点的**裸字节双工流**(Docker Engine API、tar 流这类二进制协议)。仅 `inProcess`                                                                                                                                                                                                                                                                                                                                                       |
 | `Terminal` (`ITerminalApi`)         | `GetOutputAsync` / `SearchOutputAsync` / `WriteAsync`                            | 读取/搜索会话输出;**回写输入需要用户授权**(管理页可撤销)                                                                                                                                                                                                                                                                                                                                                                                    |
 
+### 3.3a sudo 专用执行（SDK 2.1.0）
+
+专用契约已随 **SDK 2.1.0 正式发布**，由 NuGet.org 恢复；宿主 `src/tests` 中央包与 AI 显式引用已升级为 2.1.0，AI 清单要求 `minSdkVersion: 2.1.0`（`apiLevel: 2`），防止旧宿主误装。没有使用本地包、临时包源或跨仓工程引用。顶部既有全局横幅仍由发版脚本维护，本节单列新增契约所需版本。
+
+`IRemoteExecApi.StreamSudoAsync(string sessionId, string command, SudoExecOptions? options, IProgress<SudoExecEvent> progress, CancellationToken cancellationToken = default)` 返回 `Task<SudoExecResult>`。
+
+- 仅 Linux sudo，经独立 PTY exec 将**整条命令以 root 执行**，包括管道和重定向；传实际命令，不带 sudo 包装。不是 `su`、任意 stdin 或用户终端凭据自动填充，也不改变旧终端凭据交互决定。
+- `SudoExecOptions` 只有可空 `Timeout`（执行死线，null 不限时）；没有密码、来源身份、stdin 或环境变量字段。来源插件和真实目标由宿主确定。即使 NOPASSWD/缓存有效，宿主仍逐次可信确认；没有宿主 UI、PTY/认证方式不支持时明确失败，不降级普通执行。
+- `SudoExecEvent.Kind` 为 `State` 或 `Output`。State 是 `AwaitingApproval` / `AwaitingAuthentication` / `Running`；Output.Text 是保留换行和 CR 的 PTY **合并文本片段**，不保证行边界，不能当作独立 stderr。认证内容、口令与随机标记不交给插件。
+- `SudoExecResult` 含 `Outcome`、可空 `ExitCode`、`OutputChunks`（只计 Output 事件）。Outcome 为 `Unknown = 0`、`Exited`、`AuthenticationCancelled`（含拒绝审批）、`AuthenticationFailed`、`NotSupported`。后三种表示用户命令未启动；非零退出仍是 `Exited`，不是认证失败。缺失退出码的 `Exited` 按 Unknown 处理，不能默认补 0；`IsSuccess` 仅在 `Exited` 且确认退出码为 0 时为真。Unknown 不得自动重跑。
+- 调用方取消抛 `OperationCanceledException`，执行死线到期抛 `TimeoutException`；请求取消不等于已确认远端进程停止。状态/输出同步有序回调且返回前排空，接收器须快速直接转发，不使用会异步 Post 的 `Progress<T>`。普通流和 sudo 流共享每插件 4 条流上限。
+- 默认接口实现以及未配置 `FakeRemoteExec.SudoHandler` 都明确抛 `NotSupportedException`，不调用普通执行；替身用 `SudoStreamed` 单独记录请求。
+
+隔离进程的新握手能力、真实取消及事件完整性见 [IPC §7.1](../plugins/05-ipc-protocol.md#71-执行操作sdk-210)；AI 任务/审批与恢复边界见 [自动化与 AI §1.4](../plugins/11-automation-and-ai.md#14-ai-插件的托管执行与恢复sdk-210)。
+
 ### 3.4 界面与扩展点
 
 | 能力                                | 关键方法                                      | 说明                                                                                                                |
@@ -208,6 +223,7 @@ Icon = PluginIcon.Filled(RedisLogoPathData, viewBoxSize: 1030)
 | **2.0.3** | 标签页图标的第一版:`ProtocolDescriptor` / `WorkspaceDescriptor` 上各一组 `IconPathData` / `IconViewBoxSize` / `IconIsFilled`。⚠️ **这一版的三对字段已被 2.0.4 版的 `Icon` 取代,不要再用** —— 当时面板那条路还漏着,而同一个概念在两处各写三个平行属性本身就是设计错误。发布次日即改,零插件受影响。 | ❌ 已废弃,直接用 2.0.4 版                   |
 | **2.0.4**   | 标签页图标收成一个入口 `PluginIcon`(见 §3.6),三处共用:`ProtocolDescriptor.Icon`、`WorkspaceDescriptor.Icon`,以及**新增的** `PanelOptions.Icon` —— 面板标签走的不是描述符那条路,2.0.3 漏了它。带 `PluginIcon.Stroked` / `PluginIcon.Filled` 两个便捷构造。 | 用到就要(`2.0.4`)                           |
 | **2.0.6** | `IProtocolStreamUpload`:`IProtocolFileSystem` 可**选择**兼实现的接口 —— 把一条顺序读的流写成远端文件(覆盖)。宿主据此把文件在两个远程会话之间经内存中转,而不必先落一份临时文件(「远程 + 远程」双栏文件标签)。流归调用方;可能不可 Seek,长度单独给出;不续传。不实现完全合法:宿主就把这个协议当作不支持从流上传。只增不改,`apiLevel` 不变。 | 用到就要(`2.0.6`) |
+| **2.1.0** | `StreamSudoAsync`、sudo 非敏感事件/结果与专用测试替身；执行操作握手、取消及有序完整通知。已正式发布，见 §3.3a。 | 用到就要（`2.1.0`）；AI 清单已声明 |
 
 ### 2.0 迁移
 

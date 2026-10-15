@@ -54,19 +54,23 @@ public interface IRemoteFs
 
 ## 3. vela.remoteExec — 远程执行(S5/S6)
 
-权限:`remote.exec`(高敏)。走**独立 exec 通道**,不进用户终端、不污
-染用户 shell 历史与环境。
+走**独立执行通道**，不进用户终端，不污染用户 shell 历史与环境。实际接口是 `IRemoteExecApi`，完整参考见 [SDK §3.3a](../sdk/sdk-reference.md)。
 
-```csharp
-public interface IRemoteExec
-{
-    Task<ExecResult> RunAsync(string sessionId, string command, ExecOptions opts, CancellationToken ct);
-    // ExecOptions: 超时(默认 30s,上限 10min)、stdin、环境变量、最大输出(默认 4MB,截断标记)
-    IAsyncEnumerable<ExecOutputChunk> StreamAsync(...);            // 长命令流式输出
-}
-```
+| 方法 | 实际契约与限制 |
+| --- | --- |
+| `RunAsync` | 返回 `ExecResult.Output` / `Error` / `ExitCode`，非零退出是结果而非异常；默认 30 秒，最长 10 分钟 |
+| `StreamAsync` | `IProgress<ExecOutput>` 按 stdout/stderr 回调，返回 `ExecStreamResult`；默认无执行死线，令牌取消或显式 Timeout 收尾，不提供 stdin |
+| `StreamSudoAsync`（SDK **2.1.0**） | 返回 `SudoExecResult`，`IProgress<SudoExecEvent>` 回调无秘密状态与 PTY 合并原始文本片段；仅 Linux sudo，整条命令 root（含管道/重定向），不是通用交互 API |
 
-审计:每次执行的完整命令文本入审计日志(§06-4),不可关闭。
+普通与 sudo 流共享每插件 4 条流上限，接收器应同步快速转发，不用 `Progress<T>` 打乱输出顺序。普通流无换行长输出按最多 4096 字符分片，CR 可分段，超长行带 `[VelaShell: continued]`，因此不要依赖一条回调等于一条完整应用记录。
+
+**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 仅覆盖 `terminal.write` / `session.open`。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
+
+AI 插件的提权审批与宿主确认是两层：`Ask` / `ReadOnlyAuto` 使用独立 `run_command_elevated` 类型、展示目标及整条 root 范围且不设 RepeatKey；缺少审批 Handler 即拒绝，root `cat` 也不能按只读自动放行。用户明确选择 `Bypass` 只跳过插件审批，绝不跳过宿主确认。MCP 无 Handler 时前两模式拒绝，Bypass 可以请求桌面宿主确认。
+
+密码仅在宿主可信遮罩输入框内收集，不读取登录密码、不记忆、不进入 SDK/RPC/插件/模型/历史/日志；受控 PTY 确认关闭回显并匹配本次随机提示后才发送。命令启动后永久关闭密码应答，stdin 关闭。启动标记的完整原始字节不得直接出现于 sudo 可能回显的 argv，只有真正获准执行的 root 包装进程才能生成；sudoers 拒绝诊断不得被误判为 Running/Exited，也不得作为命令输出泄漏认证尾部。复杂 PAM/OTP、无 UI、PTY 被拒及受限 sudoers 拒绝 root shell 包装时明确失败，不绕过策略、不自动普通执行重试。普通命令包含 sudo 不做正则改写或自动提权重跑，避免重放前半段副作用。这不是终端自动填充，不改变旧终端凭据交互决定。
+
+诊断租约与保守异步收尾见 [SSH 规格 §9.1](../ssh/spec/08-failures.md#91-敏感交互的连接级载荷抑制租约)；授权范围缓存/撤销限制和未验证部分见 [安全说明 §1.1](12-security-threat-model.md#11-此次-sudo-与-ai-托管执行的实际边界sdk-210)。
 
 ## 4. vela.terminal — 终端(S3/S4)
 
