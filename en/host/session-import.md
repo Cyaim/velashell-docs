@@ -285,7 +285,7 @@ The exported CSV doubles as the template; the header is always:
 | `tags` | separated by semicolons (`,` and `\|` work too) | — |
 | `notes` | notes, may span lines (wrap the cell in double quotes) | — |
 
-Rows that give an FTP or plugin connection key / certificate / agent / Tailscale SSH authentication are errors (those protocols only take passwords). Tailscale profiles clear old passwords, keys, passphrases, certificates, shared references and Remember password. JSON writes `"authMethod":"tailscale"` and accepts numeric `4`; even encrypted exports omit old SSH secrets. Overwriting clears material after merging and skips shared-reference resolution before it can fail, while preserving jump hosts and other settings. Reading is as forgiving as it can be:
+Rows that give an FTP or plugin connection key / certificate / agent / Tailscale SSH authentication are errors (those protocols only take passwords). Tailscale profiles clear old passwords, keys, passphrases, certificates, shared references and Remember password. JSON writes `"authMethod":"tailscale"` and accepts numeric `4`; even encrypted exports omit old SSH secrets. Overwriting clears material after merging and skips shared-reference resolution before it can fail, while preserving jump hosts and other settings. External Tailscale shared credentials are unsupported: their references are cleared with an explicit warning, the entries are not imported, and matching by ID or name never fills a local credential with their old secrets. Reading is as forgiving as it can be:
 
 - The delimiter is detected from the header row: comma, semicolon or tab (German-locale Excel saves semicolons,
   and cells copied out of a spreadsheet are tab-separated)
