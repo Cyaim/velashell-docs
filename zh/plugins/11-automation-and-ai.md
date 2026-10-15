@@ -74,7 +74,7 @@
 **发布与验证状态：**
 
 - SDK 2.1.0 已正式发布并由 NuGet.org 恢复，`src/tests` 中央包及 AI 显式引用已升级；AI 清单为 `minSdkVersion: 2.1.0`、`apiLevel: 2`。正式包缺类型的旧阻塞已解除，不使用本地包或临时源。
-- 正式 SDK 装配后的执行 RPC、Capability 与 AI sudo 参数化回归已通过。Infrastructure 全量报告中，平台/环境跳过与 `[SKIP]` 早退仍算未验证，不能把报告“通过”全当实际执行。宿主 sudo 对话框及本地化/HeadlessDispatch/DialogButtonStyle 相关门禁已通过，这不是全 UI 回归。最新拒绝守卫修复后的全 AI、SSH 与严格构建结果仍待最终汇总，不把旧检查点套到新修复。
+- 正式 SDK 装配后的执行 RPC、Capability 与 AI sudo 参数化回归已通过。Infrastructure 全量报告中，平台/环境跳过与 `[SKIP]` 早退仍算未验证，不能把报告“通过”全当实际执行。宿主 sudo 对话框及本地化/HeadlessDispatch/DialogButtonStyle 相关门禁已通过，这不是全 UI 回归。最新拒绝守卫修复后的全 AI 与 SSH 定向回归已通过；最终 Debug 严格非增量构建已通过（警告视为错误，启用构建期代码风格检查，零警告/零错误），风格收尾后定向回归也已重新编译通过，不把旧检查点套到新修复。
 - Ubuntu 24.04.5 LTS（sudo 1.9.15p5）与 Debian 12 bookworm（sudo 1.9.13p3）在真实 sshd/PTY/PAM 上各通过完整 sudo 矩阵：UTF-8/requiretty、NOPASSWD 仍确认、错密重试与上限、取消、受限 sudoers、假提示/stdin 关闭、断线 Unknown、长前台完成后下一命令、显式 root 与外部取消；同时启用 payload tap 检查秘密不泄漏。前轮 apt 未 ready/策略拒绝误判失败均保留记录，修复后重跑，不再是当前阻塞。
 - 真实验证针对执行内核，不等于用户真实点击 GUI → 插件 IPC → 远端的整链实测；内存分片/EOF 状态机与宿主层回归是独立证据。复杂 PAM/OTP 不支持，认证超时与迟到租约的综合动态验收仍不应从现有用例推断。
 - 交付前按同一最终源码完成正式包构建、拒绝停止回归与宿主 UI/IPC 检查，保留平台/环境未验范围；全局版本横幅仍由发版脚本管理，不手工改写。

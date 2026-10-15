@@ -26,7 +26,7 @@
 - 托管任务绑定入口/对话/run、固定 sessionId；MCP 客户端隔离，查询/启动/完成重验 scope，清理取消不受读取授权撤销阻挡。**现有撤权限制**：`ISessionScope` 没有 Changed/撤权事件且组成员查询有 5 秒缓存；MCP/Bridge 设置 reload 会取消旧 run，但普通会话树分组成员变更若未触发 reload，仅在上述检查点复验，不能承诺密码框期间即时撤权。
 - 插件审批拒绝/缺 Handler 与宿主 AuthenticationCancelled 都将当前 run 置为已拒绝，模型步骤、工具调用及后台续接强制 `ExecutionDenied` 暂停，不仅返回劝阻字符串；桌面/Bridge 新用户轮次须新 run；MCP 每客户端 host 使用固定 scope，后续工具继续拒绝（仅 `task_cancel` 清理），不是下一条 HTTP call 就复位，需新 host/session 或重新连接/刷新授权配置取得新 scope。Stop/入口销毁/卸载与隔离连接断开会取消并异步收尾；取消请求不保证远端已停止。Unknown、缺失退出码、已启动超时且未确认停止禁止自动推进/副作用重放。此功能不是用户终端自动填充，不修改已有终端凭据交互决定，也不支持 su/任意 stdin 或跨重启恢复。
 
-SDK 2.1.0 已正式发布并用于宿主/AI，执行 RPC、Capability 及 sudo 参数化回归已通过；Ubuntu/Debian 的真实 sshd/PTY/PAM 执行内核矩阵（含重试、取消、策略拒绝）已通过。宿主 sudo 对话框及相关本地化/调度/样式门禁已通过（不是全 UI 套件），最新拒绝守卫后的全 AI、SSH 与严格构建结果仍待汇总；真实内核不等于 GUI 与插件 IPC 整链真实验收，认证超时/迟到租约综合动态范围不能自行扩大。当前发布/验证边界见 [自动化与 AI §1.4](11-automation-and-ai.md#14-ai-插件的托管执行与恢复sdk-210)。
+SDK 2.1.0 已正式发布并用于宿主/AI，执行 RPC、Capability 及 sudo 参数化回归已通过；Ubuntu/Debian 的真实 sshd/PTY/PAM 执行内核矩阵（含重试、取消、策略拒绝）已通过。宿主 sudo 对话框及相关本地化/调度/样式门禁已通过（不是全 UI 套件），最新拒绝守卫后的全 AI 与 SSH 定向回归已通过，最终 Debug 严格非增量构建与风格收尾后的重新编译定向回归也已通过；真实内核不等于 GUI 与插件 IPC 整链真实验收，认证超时/迟到租约综合动态范围不能自行扩大。当前发布/验证边界见 [自动化与 AI §1.4](11-automation-and-ai.md#14-ai-插件的托管执行与恢复sdk-210)。
 
 ## 2. 威胁清单与缓解
 
