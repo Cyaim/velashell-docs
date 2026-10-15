@@ -46,18 +46,23 @@ Host-side protections: a per-plugin limit on concurrent SFTP operations (4 by de
 
 ## 3. vela.remoteExec, Remote Execution (S5/S6)
 
-Permission: `remote.exec` (high sensitivity). Uses a **dedicated exec channel**, does not enter the user's terminal, and does not contaminate the user's shell history or environment.
+Uses a **separate execution channel**, never the user's terminal or its shell history/environment. The actual interface is `IRemoteExecApi`; see the [SDK reference §3.3a](../sdk/sdk-reference.md).
 
-```csharp
-public interface IRemoteExec
-{
-    Task<ExecResult> RunAsync(string sessionId, string command, ExecOptions opts, CancellationToken ct);
-    // ExecOptions: timeout (30s by default, maximum 10min), stdin, environment variables, maximum output (4MB by default, with truncation marker)
-    IAsyncEnumerable<ExecOutputChunk> StreamAsync(...);            // Streaming output for long-running commands
-}
-```
+| Method | Actual contract and limits |
+| --- | --- |
+| `RunAsync` | Returns `ExecResult.Output` / `Error` / `ExitCode`; nonzero exit is a result, not an exception. Default 30 seconds, maximum 10 minutes |
+| `StreamAsync` | stdout/stderr callbacks through `IProgress<ExecOutput>`, returning `ExecStreamResult`; no execution deadline by default, caller cancellation or explicit Timeout ends execution; no stdin |
+| `StreamSudoAsync` (SDK **2.1.0**) | Returns `SudoExecResult`; `IProgress<SudoExecEvent>` carries non-secret states and merged raw PTY text fragments. Linux sudo only; the entire command runs as root, including pipes/redirections. Not a general interaction API |
 
-Auditing: the complete command text for every execution is written to the audit log (§06-4) and cannot be disabled.
+Ordinary and sudo streams share the limit of four per plugin. Receivers must forward synchronously and quickly, not reorder output with `Progress<T>`. Ordinary output without newlines is split into fragments of at most 4096 characters; CR may delimit fragments, and long lines carry `[VelaShell: continued]`. Do not assume one callback is one complete application record.
+
+**Separate current permission behavior from design goals.** This blueprint's `remote.exec` Broker, universal Demand and non-disableable audit are design goals, not guarantees delivered here. The current `PluginPermissionGate` covers only `terminal.write` / `session.open`. This change adds **trusted host confirmation on every sudo call**, not a complete generic permission system. Source identity is bound from the host manifest and the real target comes from the connection; even NOPASSWD cannot skip confirmation.
+
+AI-plugin approval and host confirmation are separate layers. `Ask` / `ReadOnlyAuto` use the distinct `run_command_elevated` kind, display the target and whole-command root scope, and have no RepeatKey. Missing approval Handler means rejection; even root `cat` is not read-only auto-approved. Explicit user-selected `Bypass` skips only plugin approval, never host confirmation. MCP without a Handler rejects in the first two modes; Bypass may request confirmation from the desktop host.
+
+Only the host's trusted masked dialog collects the password: no login-password reuse, remembering, SDK/RPC/plugin/model/history/log exposure. The controlled PTY must confirm echo is off and match this call's random prompt before sending it. Once the command starts, password responses are permanently disabled and stdin is closed. The complete raw startup marker must not appear directly in argv that sudo may echo; only an authorized root wrapper may generate it. A sudoers refusal diagnostic must not be mistaken for Running/Exited or leak authentication-tail content as command output. Complex PAM/OTP, missing UI, rejected PTY or sudoers refusal of the root-shell wrapper fails explicitly; no policy bypass or ordinary-execution fallback. Ordinary commands containing sudo are not regex-rewritten or automatically rerun elevated, avoiding replay of an already-executed script prefix. This is not terminal autofill and does not change existing terminal credential decisions.
+
+See [SSH specification §9.1](../ssh/spec/08-failures.md#91-connection-wide-payload-suppression-leases-for-sensitive-interactions) for diagnostic leases and conservative asynchronous teardown, and [Security §1.1](12-security-threat-model.md#11-actual-boundaries-of-this-sudo-and-managed-ai-execution-change-sdk-210) for scope-cache/revocation limits and unverified areas.
 
 ## 4. vela.terminal, Terminal (S3/S4)
 
