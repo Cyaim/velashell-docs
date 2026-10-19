@@ -310,5 +310,7 @@ people press blind.
 | It answers sometimes and not others | The same Feishu app credentials are running on two machines (the platform delivers to one client at random) |
 
 Switching models or signing in again **does not require restarting the bridge** — the AI settings are
-re-read every turn, so the next message picks them up. Only channel credentials and allowlists need a
+re-read every turn, so the next message picks them up. "Fetch models" in the AI settings never prunes the
+bridge's model, the active selection or any model in the failover chain, even if a relay's list
+temporarily leaves one out. Only channel credentials and allowlists need a
 save on the settings page (which restarts the channels with the new configuration).

@@ -151,8 +151,8 @@ SDK 把错误码还原为类型化异常(`PermissionDeniedException` 等);未知
 
 - `HandshakeResponse.SupportsExecutionOperations` 为附加 init 属性，缺席/default 为 false；新宿主置 true，表示执行 operation、取消与有序通知能力。false 时 PluginHost 在发 sudo RPC 前抛 `NotSupportedException`，无弹窗、无普通降级。普通流兼容旧宿主保留两小时 RPC 兜底；只有新协议无限流才不再靠两小时死线代替取消。
 - `exec/stream` 的 `ExecStreamRequest.OperationId` 与 `exec/output` 的 `ExecOutputNotification.Sequence` 是附加 init 属性，保留原构造和 Deconstruct 签名。新增 `exec/sudoStream` 请求只含 `SessionId` / `Command` / `OperationId` / `TimeoutSeconds`；`exec/sudoEvent` 含 `OperationId` / `Sequence` / 非敏感 Event；`exec/cancel` 只含 OperationId，是插件到宿主的幂等通知。来源身份绑定该插件连接，没有密码或冒用身份参数。
-- 每插件连接独立登记操作/CTS，链接连接与插件停机；取消早于登记也必须生效，退出/断开取消并异步收尾。早到取消最多 128 个，超限 fail-closed 停止登记和活动执行，不丢弃取消后重新启动。此处不泛化其它 RPC 能力。
-- 输出与状态使用同步收集、单异步写泵，序号从 1 连续递增；新协议拒绝非正序号、缺号及乱序。256 项通知队列满时明确失败并取消操作，不静默丢输出。终态返回前排空；普通 Lines 与实际回调数、sudo OutputChunks 与仅 Output 事件数须一致，尾事件丢失也不能成功。回调不得阻塞或同步等待同一连接 RPC；不用 `Progress<T>` 或未观察通知冒充保序。
+- 每插件连接独立登记操作/CTS，链接连接与插件停机；取消早于登记也必须生效，退出/断开取消并异步收尾。早到取消最多 128 个，超限 fail-closed 停止登记和活动执行，不丢弃取消后重新启动。带 OperationId 的请求帧不随调用方取消：在写闸前排队时取消只让调用方不再等待，请求照发，随后的 `exec/cancel` 要么早于登记到达（登记即取消），要么取消已登记的操作；否则请求帧没发出、取消通知却照发，这些永远等不到请求的 id 会白白占满早到取消的上限。此处不泛化其它 RPC 能力。
+- 输出与状态进 256 项有界通知队列、由单异步写泵按序发送，序号从 1 连续递增；新协议拒绝非正序号、缺号及乱序。SSH 读泵（普通流逐行）与 sudo 执行器（逐事件）逐条等待入队：队列满就等写泵腾出位置，背压经 SSH 窗口传回远端，一段上千个短行的输出也不会冲爆队列；只有只能同步上报的调用方在队列满时明确失败并取消操作，不静默丢输出。写泵失败时立即唤醒正在等待的生产者并报出原始失败。终态返回前排空；普通 Lines 与实际回调数、sudo OutputChunks 与仅 Output 事件数须一致，尾事件丢失也不能成功。回调不得阻塞或同步等待同一连接 RPC；不用 `Progress<T>` 或未观察通知冒充保序。
 - 执行通知专用严格发送路径 `NotifyExecutionAsync` 不吞写入失败。若 IO/已释放等错误可能已写出半个长度头/帧体，立即终止该 RPC 连接、失败所有在途请求并取消其执行，不再在坏帧连接上发送错误终态。它不是普通 `NotifyAsync` 的尽力而为语义。
 - `cancelled` / `timeout` / `not-supported` 错误分别还原取消、超时、不支持；不能把用户停止变成普通失败或把缺失结果当成功。远端进程是否真的停止仍须另行确认，不能由取消通知投递成功推出。
 
