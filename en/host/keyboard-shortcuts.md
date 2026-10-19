@@ -31,7 +31,7 @@ Find the right place by scope, then come back and update the table:
 | Terminal context + macOS Command aliases | `src/VelaShell/Services/KeyboardShortcutService.cs` |
 | Clipboard / paging / key encoding inside the terminal control | `src/VelaShell.Terminal/Input/TerminalKeyRouter.cs`, `src/VelaShell.Terminal/Emulation/InputEncoder.cs` |
 | Terminal mouse gestures (selection, zoom, links) | `src/VelaShell.Terminal/Rendering/VelaTerminalControl.cs` |
-| Search bar (matched against the keymap), completion popup, disconnected-state keys | `src/VelaShell/Views/TerminalTabView.axaml.cs` |
+| Search bar (matched against the keymap), completion popup, shared-password list, disconnected-state keys | `src/VelaShell/Views/TerminalTabView.axaml.cs` |
 | Command palette / file manager / process manager / editor / dialogs | each view's own `OnKeyDown` |
 | Esc cancelling a dock drag | `src/VelaShell/Docking/Controls/DockDragController.cs` |
 | Explorer multi-select and dragging | `src/VelaShell/Views/SessionTreeView.axaml.cs` (rules in `src/VelaShell.Presentation/ViewModels/SessionTreeViewModel.cs`) |
@@ -220,6 +220,17 @@ exported settings.
 | Fall through to the shell native completion | `Tab` | — |
 | Accept the inline (ghost) suggestion | `Right` | — |
 | Accept the inline (ghost) suggestion | `End` | — |
+
+### Fill Shared Password
+
+The shared-password list that pops up on the line below the cursor when a password prompt is detected ([Interaction and UI specs §5.2.1](interaction-and-ui-specs.md#521-fill-a-shared-password-628-2026-10-15-entry-shape-redone-2026-10-16)). No row is pre-highlighted: until an arrow key is pressed, `Enter` goes to the terminal unchanged.
+
+| Action | Keys | Applies when |
+| --- | --- | --- |
+| Select the next shared password | `Down` | Only while the shared password list is open |
+| Select the previous shared password | `Up` | Only while the shared password list is open |
+| Fill the selected shared password | `Enter` | Only while the shared password list is open |
+| Dismiss the shared password list | `Esc` | Only while the shared password list is open |
 
 ### Terminal Mouse Gestures
 
