@@ -223,7 +223,7 @@ exported settings.
 
 ### Fill Shared Password
 
-The shared-password list that pops up on the line below the cursor when a password prompt is detected ([Interaction and UI specs §5.2.1](interaction-and-ui-specs.md#521-fill-a-shared-password-628-2026-10-15-entry-shape-redone-2026-10-16)). No row is pre-highlighted: until an arrow key is pressed, `Enter` goes to the terminal unchanged.
+The shared-password list that pops up against the cursor row when a password prompt is detected ([Interaction and UI specs §5.2.1](interaction-and-ui-specs.md#521-fill-a-shared-password-628-2026-10-15-entry-shape-redone-2026-10-16)). No row is pre-highlighted: until an arrow key is pressed, `Enter` goes to the terminal unchanged.
 
 | Action | Keys | Applies when |
 | --- | --- | --- |

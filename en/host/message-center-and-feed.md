@@ -83,14 +83,33 @@ Startup checks still only post a notification and never open the browser automat
 The Windows and macOS update flows are unchanged.
 
 **Download progress carries a speed (from 2026-10-14)**: while an update package is downloaded in-app on
-Windows / macOS, the About page's status line shows `percentage · downloaded/total · current speed`. The speed
-is measured over a sliding 3-second window (`DownloadRateMeter`) rather than averaged over the whole transfer —
-when the network is fast early and slow later, the overall average explains neither "it's slow now" nor "it was
-fast before". The download thread only reports when new bytes arrive, so the UI also runs a 500 ms heartbeat
-(`UpdateDownloadTracker.Tick`) that refreshes between reports: after the 1-second speed freshness window the
-speed is zeroed rather than leaving a stale number on screen, and 10 seconds without a single new byte is
-treated as a stall, switching the status line to a message that says so. The progress channel's type changes
-from `IProgress<int>` to `IProgress<UpdateDownloadProgress>` (bytes downloaded, total bytes, speed).
+Windows / macOS, the About page's status line shows `percentage · downloaded/total · current speed`; when the
+server does not give a total size it shows `N downloaded · current speed` instead, without a percentage. Until
+the first progress report arrives (while connecting, or while verifying the prefix left by an earlier attempt)
+it shows "Preparing update download…"; there are no bytes to speak of yet, so this time does not count as a
+stall. The speed is measured over a sliding 3-second window (`DownloadRateMeter`) rather than averaged over the
+whole transfer — when the network is fast early and slow later, the overall average explains neither "it's slow
+now" nor "it was fast before". The window truly slides: it keeps the samples from the last 3 seconds, and the
+speed is the byte delta from the oldest sample in the window to now divided by the elapsed time, so it does not
+jump each time a new window starts; when the transfer resumes after stopping for longer than a whole window, the
+first reading is 0 rather than the speed from before the stall. The download thread only reports when new bytes
+arrive, so the UI also runs a 500 ms heartbeat (`UpdateDownloadTracker.Tick`) that refreshes between reports:
+after the 1-second speed freshness window the speed is zeroed rather than leaving a stale number on screen, and
+10 seconds without a single new byte is treated as a stall, switching the status line to "no data for N, the
+connection may have dropped". All timing uses a monotonic clock (`Environment.TickCount64`, injectable for
+tests), so a system clock correction or manual change cannot produce a false stall. The progress channel's type
+changes from `IProgress<int>` to `IProgress<UpdateDownloadProgress>` (bytes downloaded, total bytes, speed).
+
+The "stalled" text is only a hint; the actual reconnect is done by a watchdog in `UpdateService`. Silent drops
+such as an expired NAT entry or a VPN going down do not make TCP report an error, so the read just hangs (the
+download reads with `ResponseHeadersRead`, and `HttpClient`'s overall timeout does not cover the response body).
+Each download attempt therefore gets an idle timeout that is pushed back on every progress report; **45 seconds
+without progress** cancels the attempt and resumes from the `.partial` file with a Range request (segmented
+downloads also keep per-segment progress in `.partial.meta`). Stall reconnects are capped at **3**; when they
+are used up and still no data arrives, the status shows "Download failed. Please try again later.", the Check
+for Updates button becomes clickable again, and the partial file is kept for the next attempt to resume. A
+cancellation by the caller is not retried (`IUpdateService.DownloadUpdateAsync` now takes a `CancellationToken`
+for this).
 
 ## 3. Feed contract (what the backend publishes)
 
