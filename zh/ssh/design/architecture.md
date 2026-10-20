@@ -1380,6 +1380,8 @@ dotnet test tests/VelaShell.Ssh.Tests/VelaShell.Ssh.Tests.csproj --filter "TestC
 pwsh scripts/ssh/interop/Stop-TestServer.ps1
 ```
 
+脚本默认把容器的 sshd 映射到本机 **2229**（2026-10-19 起；`docker-compose.test.yml` 的靶机占着 2222–2228，撞上了 `VelaShell.Core.Tests` 的集成用例会连到这台上、失败而不是跳过），并在 compose 的 `ssh-shells` 靶机在跑时加入它所在的 Docker 网络 —— agent 目的地约束的逐跳用例要从这台服务端连到那台；`-Port`、`-Network` 可以改，`-Network '` 不加入。
+
 互操作矩阵跑**两个** OpenSSH 版本：`latest`（后量子 KEX 在这里才有）
 与 `9.3`（验证我们没有默默依赖新算法 —— 真实世界里有大量停在几年前的设备）。
 它**不在 CI 里**：要起容器，慢且依赖网络。原先的 CI `interop` job 只在推 main 与手动触发时跑，

@@ -1396,6 +1396,8 @@ dotnet test tests/VelaShell.Ssh.Tests/VelaShell.Ssh.Tests.csproj --filter "TestC
 pwsh scripts/ssh/interop/Stop-TestServer.ps1
 ```
 
+By default the script maps the container's sshd to local port **2229** (since 2026-10-19; the `docker-compose.test.yml` targets occupy 2222–2228, and a collision makes `VelaShell.Core.Tests` integration tests connect to this server and fail instead of skipping), and, when the compose `ssh-shells` target is running, joins its Docker network — the agent destination-constraint hop test has to reach that target from this server. `-Port` and `-Network` override both; `-Network '` does not join any network.
+
 The interop matrix runs **two** OpenSSH versions: `latest` (the only place post-quantum KEX is
 available) and `9.3` (to verify we don't silently depend on new algorithms — the real world has
 plenty of devices stuck several years back). It is **not in CI**: it needs a container, is slow and
