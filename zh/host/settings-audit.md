@@ -521,3 +521,16 @@ TCP 端口在新的「安全」一节(原先都排在「键盘」下面)。
   `~/.velashell/startup.appearance`(几行 `key=value`),每次启动读到设置后也按它对齐一次(内容没变不写盘)—— 与 `render.mode` 同理。
   这一项参与云同步:它是偏好,不是机器相关的状态。
 - `VELASHELL_NO_SPLASH=1` 关掉启动画面(自动化测试、录屏、排障用),优先于设置。
+
+### 2026-10-19 第十四批(录制与会话日志的输出遮盖)
+
+会话日志与会话录制存的是终端原始输出:`cat .env`、`kubectl get secret -o yaml`、`env | grep TOKEN` 的口令与令牌原样落盘。
+在两者共用的挂钩点(`SshTerminalBridge.DataReceived`)与记录之间加一道遮盖(`SessionOutputMasker`),屏幕显示不经过它。
+
+| 设置 | 默认 | 取值 | 备注 |
+| --- | --- | --- | --- |
+| 录制与会话日志中遮盖口令和令牌 | 开 | 开 / 关(`Security.MaskSecretsInCaptures`) | 在「安全审计 → 会话录制」里,自动录制下面;**对之后开始的录制与会话日志生效**。会话日志的开关在「常规」,遮盖两边一起管 |
+
+- **遮什么**(大小写不敏感,宁可多遮):名字里带 password / passwd / passphrase / secret / token / api key / access key / private key / credential 的 `名字=值`、`名字: 值`(含 JSON、YAML 写法;名字与分隔符之间的 `grep --color` 颜色序列不碍事)只换值;`Bearer` / `Basic` 后面的凭据;PEM 私钥块正文(BEGIN / END 两行留着);自带前缀的令牌(AWS `AKIA…` / `ASIA…`、GitHub `ghp_…` 一类、Slack `xox?-…`、`sk-…`)。都换成 `***`。`PWD=` 这类当前目录不算。
+- **按字节、按行**:每个字节按 Latin-1 映射再匹配,规则与替换都是 ASCII,UTF-8、GBK 原样往返;整行才匹配,最后不完整的一行只在正写到一个值的中间(或在私钥块里)时扣下等后半段(上限 4 KB),等输入的 `Password: ` 提示与全屏程序不换行的输出当场放出。停止记录时扣着的部分遮完放出。
+- 不做的:按用户规则自定义(与「终端输出的自定义高亮规则」共用规则表,见 `feature-plan.md`);不在名字里、也没有前缀的裸值(比如单独一行的 base64)认不出来。

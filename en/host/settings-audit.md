@@ -574,3 +574,17 @@ painted its first frame. Interaction: [interaction-and-ui-specs.md](interaction-
   once with the settings it read (no write when nothing changed) — the same approach as `render.mode`. The item takes part in cloud sync: it is
   a preference, not machine state.
 - `VELASHELL_NO_SPLASH=1` turns the splash screen off (automated tests, screen recording, troubleshooting) and wins over the setting.
+
+### 2026-10-19 Fourteenth batch (masking secrets in recordings and session logs)
+
+Session logs and session recordings store the raw terminal output: the passwords and tokens printed by `cat .env`, `kubectl get secret -o yaml`
+or `env | grep TOKEN` land on disk verbatim. A masking stage (`SessionOutputMasker`) now sits between the hook point both use
+(`SshTerminalBridge.DataReceived`) and the recorders; the display path never goes through it.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Mask passwords and tokens in recordings and session logs | On | On / Off (`Security.MaskSecretsInCaptures`) | Under Security Audit → Session recording, below automatic recording; **applies to recordings and session logs started afterward**. The session log switch lives under General; masking covers both |
+
+- **What is masked** (case-insensitive, erring on the side of masking): in `name=value` / `name: value` (JSON and YAML forms included; `grep --color` color sequences between the name and the separator do not get in the way) where the name contains password / passwd / passphrase / secret / token / api key / access key / private key / credential, only the value; the credential after `Bearer` / `Basic`; the body of PEM private key blocks (the BEGIN / END lines stay); tokens with a recognizable prefix (AWS `AKIA…` / `ASIA…`, GitHub `ghp_…` and friends, Slack `xox?-…`, `sk-…`). All become `***`. The current directory in `PWD=` is not a secret.
+- **Bytes and lines**: every byte maps to one Latin-1 character before matching; rules and replacements are ASCII, so UTF-8 and GBK round-trip unchanged. Only complete lines are matched; the trailing incomplete line is held back only when it stops in the middle of a value (or inside a private key block), up to 4 KB, while `Password: ` prompts waiting for input and full-screen programs that never print a newline pass through immediately. Whatever is held is masked and released when recording stops.
+- Not done: user-defined rules (meant to share a rule table with "custom highlight rules for terminal output", see `feature-plan.md`); bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
