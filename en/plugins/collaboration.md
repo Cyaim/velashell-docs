@@ -198,6 +198,12 @@ This one is **on by default**: loopback-only plus a mandatory token plus a read-
 a low enough risk, while "off by default" only adds the pointless step of hunting through a settings
 page before an agent can be connected.
 
+### 2.3a Large-file uploads and progress (SDK 2.1.1)
+
+`upload_local_file` reads a file from **the machine running VelaShell**, not the external model's machine. Supply an absolute path on that machine for local MCP output. There is no longer a 32 MiB upload cap: an independent job quickly returns `transfer_id` and structured progress. External agents use `transfer_status` or `transfer_wait` (up to 30 seconds) for state, transferred/total bytes, speed and ETA. Wait expiry does not cancel the upload, and an MCP request deadline is not the background transfer's execution deadline.
+
+The server does not wake an external model. Running is not success: verification and commit may continue after all bytes are transferred, and only `Succeeded` means complete. `transfer_cancel` uses the expected generation from the snapshot; accepting cancellation does not confirm remote termination. Never replay `Unknown` automatically; `transfer_resume` is available only when the host confirms safe recovery. Uploads preserve existing destinations by default; explicit overwrite still follows the configured write-approval mode. Every new upload also requires trusted desktop-host confirmation of the specific source/destination and overwrite policy, approving only that job. `Bypass` cannot skip it; missing prompt or desktop window means rejection. Plugin management can revoke upload leases, requesting cancellation without promising rollback of already committed files. IM platform file limits, downloads and chat attachments are unchanged. See [Automation and AI §1.6](11-automation-and-ai.md#16-ai-file-uploads-and-progress-sdk-211) for the full tool contract.
+
 ### 2.4 Configuring "Allowed servers" (reworked 2026-09-05)
 
 The UI is a dropdown plus — when restricted — a **checklist**, the very same one used by

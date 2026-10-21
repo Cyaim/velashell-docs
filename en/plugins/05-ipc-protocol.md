@@ -127,6 +127,18 @@ This describes the official SDK 2.1.0 contract and execution operations in the c
 
 SDK contracts, strict-send/partial-frame regressions and host `ExecutionRpcTests` against the official SDK 2.1.0 assembly have actually passed. The missing-sudo-type compilation blocker is resolved. An initial RPC timeout came from a fixture that had not started its read pump; it passed after fixing the fixture, rather than ignoring the timeout. **RPC regression coverage is not acceptance of a real GUI-to-remote flow.** See [Automation and AI §1.4](11-automation-and-ai.md#14-managed-execution-and-recovery-in-the-ai-plugin-sdk-210) for release and verification boundaries.
 
+### 7.2 Independent upload jobs (SDK 2.1.1)
+
+The host still streams file content from a local path rather than embedding it in JSON. New `fs/transfer/startUpload|get|wait|cancel|resume` requests exchange only job parameters and immutable snapshots; the transfer is not tied to one long RPC. Existing synchronous `fs/upload` / `fs/download` are unchanged, and their legacy two-hour RPC fallback must not be mistaken for unlimited transfer support.
+
+- Handshake `SupportsTransferOperations` defaults to false and is advertised only by an implementing host. Unsupported calls fail explicitly, never silently fall back to synchronous upload.
+- Start and resume `OperationId` values share the plugin-lifetime namespace. The host deduplicates by authenticated plugin identity and arguments; replay must not upload twice. Request cancellation or a lost receipt does not prove that work never started: reuse the same id to retrieve the receipt, never generate another id and reupload.
+- A `wait` window is 0–30 seconds, waiting only for increasing `Sequence` or terminal state. Expiry returns the current snapshot, and cancelling a wait does not kill the background transfer. Queries are authoritative; progress can be throttled and reread rather than requiring every notification as a log stream would.
+- Cancellation carries `ExpectedGeneration`, preventing stale cancellation from stopping a resumed generation. Resume includes explicit `TargetSessionId`; the host validates connection identity and checkpoint, without accepting caller-supplied resume offsets.
+- `Succeeded` requires successful remote finalization, validation and atomic commit. Full byte counts, a sent cancellation request or a closed connection prove neither success nor termination. An unresolved commit outcome is `Unknown`, never automatically replayed or resumed.
+
+See [SDK §3.3b](../sdk/sdk-reference.md#33b-independent-upload-jobs-sdk-211) for DTOs, ownership, recovery and timeout budgets. The contract provides no cross-application-restart recovery and cannot remove remote storage, authorization or network constraints.
+
 ## 8. Development Plan (This Work Item)
 
 | Task | Description | Dependency | Estimate |

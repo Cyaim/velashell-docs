@@ -1,6 +1,6 @@
 # 12 · Security and Threat Model
 
-> **Current-state qualification:** The v1 strength/mitigation tables below are blueprint targets, not guarantees for every current plugin runtime mode. inProcess plugins still exist; `PluginPermissionGate` currently covers only `terminal.write` / `session.open`. Dedicated host sudo confirmation does not imply universal Broker enforcement, complete process isolation or auditing. See §1.1 for this change's actual boundaries.
+> **Current-state qualification:** The v1 strength/mitigation tables below are blueprint targets, not guarantees for every current plugin runtime mode. inProcess plugins still exist; `PluginPermissionGate` currently covers `terminal.write` / `session.open` and dedicated per-job leases for the new upload API (see [Capability APIs §2.1](07-capability-apis.md#21-independent-upload-jobs-sdk-211)), not generic grants for other file operations. Dedicated host sudo confirmation does not imply universal Broker enforcement, complete process isolation or auditing. See §1.1 for this change's actual boundaries.
 
 ## 1. Trust Model (Layered Statements, No Overclaiming)
 
