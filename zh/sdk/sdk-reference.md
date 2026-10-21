@@ -105,6 +105,35 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 隔离进程的新握手能力、真实取消及事件完整性见 [IPC §7.1](../plugins/05-ipc-protocol.md#71-执行操作sdk-210)；AI 任务/审批与恢复边界见 [自动化与 AI §1.4](../plugins/11-automation-and-ai.md#14-ai-插件的托管执行与恢复sdk-210)。
 
+### 3.3b 独立上传任务（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，不代表宿主或 AI 的长传输功能已上线。** 版本号由发布者决定；不修改版本横幅、不制作下游使用的本地包。正式包发布后，宿主中央依赖、测试替身及 AI 插件显式引用再一起升级，并实现下面的任务生命周期。
+
+`IRemoteFsApi.SupportsTransferOperations` 默认 `false`；新方法的默认实现抛 `NotSupportedException`，不退回长时间的 `UploadFileAsync`。现有接口和 RPC DTO 的构造/解构签名不变，apiLevel 不变。能力开关仅适用于新契约程序集已加载的宿主；新插件仍需声明正式新版本的最低 SDK 依赖，不能假定旧 SDK 程序集能加载新类型。
+
+| 方法 | 语义 |
+| --- | --- |
+| `StartUploadAsync(sessionId, localPath, remotePath, RemoteUploadOptions, ct)` | 返回 `RemoteTransferSnapshot`，不等待传完；以宿主绑定的插件身份和 `OperationId` 幂等去重，相同 id 参数变化则拒绝 |
+| `GetTransferAsync(transferId, ct)` | 读取所属插件且当前有权访问的任务快照，不泄漏越权 id 的信息 |
+| `WaitTransferAsync(transferId, afterSequence, waitTimeout, ct)` | 等 `Sequence > afterSequence` 或终态；`afterSequence >= 0`，等待窗口 0–30 秒（`MaxTransferWaitSeconds`），到期返回当前快照 |
+| `CancelTransferAsync(transferId, expectedGeneration, ct)` | 幂等取消指定执行代次；不匹配当前 `Generation` 则拒绝，旧取消不能停止恢复后的新代次 |
+| `ResumeTransferAsync(transferId, RemoteTransferResumeOptions, ct)` | 显式、重新审批后恢复；选项为非空 `OperationId`、正数 `ExpectedGeneration` 和非空 `TargetSessionId`，不能指定路径/偏移/源文件身份 |
+
+`RemoteUploadOptions` 只有必填非空 `OperationId`、`Overwrite`（默认否）及可空正数 `Timeout`（null 无执行死线）。无固定文件大小上限；64 位字节计数不受 32 MiB 或 `int.MaxValue` 限制，但不消除磁盘、权限、协议和网络边界。实现必须按流传输，不整体载入内存。宿主用不可预测的临时文件，校验和远端收尾成功后原子提交；无法实现所请求的原子提交/覆盖时明确失败，不能先删除目标。
+
+`RemoteTransferSnapshot` 包含任务/启动标识、会话与源/目标路径、`State`、从 1 开始的单调 `Sequence`、`TransferredBytes`/`TotalBytes`（未知 -1、空文件 0）、可空速率/ETA、创建/更新/完成时间、取消意图、远端停止确认、恢复检查点及错误类别/信息。`State` 默认 `Unknown = 0`；其余状态为 `Queued`、`Starting`、`Running`、`CancelRequested`、`Succeeded`、`Failed`、`Cancelled`、`TimedOut`。字节满格时可能还在 `Running`，不能据此宣称完成；`IsSuccess` 仅对应 `Succeeded`。`Unknown`/`TimedOut` 属于本地终态，不证明远端写入停止，不得自动重传。
+
+- 启动、查询、等待、取消和恢复的令牌都只控制**本次请求**；等待到期/请求取消不停止已启动的任务，显式取消意图一经登记不因请求取消而回滚。启动回执丢失时复用同一 `OperationId`，不能另造 id 重传。
+- 任务由宿主持有、归属宿主确认的插件身份，所有访问复核授权。插件侧 AI run/对话隔离仍须另行实施，不能把插件归属当成对话隔离。插件停用、授权撤销、SSH 断线和宿主退出须收尾；无停止确认则为 `Unknown`。只保证当前应用/插件生命周期，不承诺应用重启、插件重新激活或 MCP 会话销毁后仍可恢复。
+- 首次审批绑定规范化源/目标路径、实际源对象和覆盖策略；宿主检查本地读取与远端写入权限，排队开始前及整个传输期间保持源稳定，防止路径替换、符号链接与并发写入改变已批准内容，无法保证即失败。`Overwrite=false` 必须使用原子无替换提交，不能只在上传前检查存在性。
+- 启动/恢复的 `OperationId` 共用插件生命周期命名空间，记录请求种类和全部参数；操作串行化，先复核授权与去重记录再检查状态，重复请求返回当前快照但不执行。回执/墓碑保留整个生命周期，额度满拒绝新增，不遗忘 id 后重执行；参数冲突抛 `InvalidOperationException`，不存在或不属于本插件的 id 统一抛 `FileNotFoundException`。
+- 快照增加 `Generation`（从 1 开始，每次恢复加一）及 `DestinationCommitConfirmedAbsent`（默认 false）。`CanResume` 还要求确认最终目标未提交；提交回执丢失未消歧时绝不可恢复。重新验证源对象、临时文件归属和检查点；重连通过明确的 `TargetSessionId` 选择连接，宿主核对服务器密钥身份、账户和文件命名空间，仅地址相同不足以恢复。恢复保持 `transferId` 和递增 `Sequence`，清除取消意图与完成时刻，不满足条件拒绝而不从头重传。
+- `Timeout` 从每执行代次登记起算，含排队/收尾；显式恢复经重新审批后以原时长重新获得预算，不继承已耗尽死线。null 仍表示无执行死线。
+- RPC 新增 `fs/transfer/startUpload|get|wait|cancel|resume|progress`，载荷为 `FsTransferStartUploadRequest`、`FsTransferRef`、`FsTransferWaitRequest`、`FsTransferCancelRequest`、`FsTransferResumeRequest`、`FsTransferProgressNotification`。握手的 `SupportsTransferOperations` 默认 false，旧宿主不能被推断为支持。`progress` 携带快照，按 `TransferId + Sequence` 丢弃旧帧；至少 100ms 节流，状态变化及时发送，通知丢失用 get/wait 补读，通知不具备 exec 专用严格发送保证。
+- `FakeRemoteFs` 显式配置能力开关和 start/get/wait/cancel/resume 的 Handler，记录独立请求，转发参数及请求令牌；没有 Handler 就明确不支持，不退回现有整文件内存上传。幂等、权限及真正的任务执行由宿主实现，测试脚本须显式模拟，不由替身伪造成功。
+
+此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主/AI 后续接线后才能提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。
+
 ### 3.4 界面与扩展点
 
 | 能力                                | 关键方法                                      | 说明                                                                                                                |
