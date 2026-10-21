@@ -92,6 +92,10 @@ Finite background job completion locally wakes its owning conversation and adds 
 - Real tests validate the execution kernel, not a complete human-operated GUI → plugin IPC → remote flow. In-memory fragmented/EOF state-machine and host-layer regressions are separate evidence. Complex PAM/OTP is unsupported; combined authentication-timeout/late-lease dynamic acceptance must not be inferred from existing cases.
 - Before delivery, complete official-package builds, rejection-stop regressions and host UI/IPC checks against the same final source, retaining platform/environment coverage limits. Global version banners remain release-script-managed rather than manually rewritten.
 
+### 1.5 Model lists in the AI plugin settings
+
+Provider model lists in the settings sidebar are collapsed by default, regardless of model count; each provider row still shows its model count. When opening settings, if the active model's provider is collapsed, its provider row is selected without automatically expanding the list; if it was saved as expanded, the active model remains selected. The chat model is unchanged. Click a provider row or press → to expand and ← to collapse; manual choices are saved. Explicitly adding or navigating to a model still reveals it for editing.
+
 ## 2. AI Gateway (S3, Longer-Term Mainline)
 
 ### 2.1 Why a "Gateway" Instead of Giving Every Plugin Its Own Model SDK
