@@ -105,9 +105,9 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 隔离进程的新握手能力、真实取消及事件完整性见 [IPC §7.1](../plugins/05-ipc-protocol.md#71-执行操作sdk-210)；AI 任务/审批与恢复边界见 [自动化与 AI §1.4](../plugins/11-automation-and-ai.md#14-ai-插件的托管执行与恢复sdk-210)。
 
-### 3.3b 独立上传任务（SDK TBD，发版时替换）
+### 3.3b 独立上传任务（SDK 2.1.1）
 
-**此处是尚未发布的 SDK 契约，不代表宿主或 AI 的长传输功能已上线。** 版本号由发布者决定；不修改版本横幅、不制作下游使用的本地包。正式包发布后，宿主中央依赖、测试替身及 AI 插件显式引用再一起升级，并实现下面的任务生命周期。
+**独立上传任务契约已随 SDK 2.1.1 正式发布到 NuGet.org。** 宿主中央依赖、测试替身及 AI 插件显式引用统一使用 2.1.1，AI 清单要求 `minSdkVersion: 2.1.1`（`apiLevel: 2`）；不使用本地包或临时包源。契约发布不等于所有宿主具备执行器，调用方仍须检查实际能力并遵守下面的任务生命周期。
 
 `IRemoteFsApi.SupportsTransferOperations` 默认 `false`；新方法的默认实现抛 `NotSupportedException`，不退回长时间的 `UploadFileAsync`。现有接口和 RPC DTO 的构造/解构签名不变，apiLevel 不变。能力开关仅适用于新契约程序集已加载的宿主；新插件仍需声明正式新版本的最低 SDK 依赖，不能假定旧 SDK 程序集能加载新类型。
 
@@ -132,7 +132,9 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 - RPC 新增 `fs/transfer/startUpload|get|wait|cancel|resume|progress`，载荷为 `FsTransferStartUploadRequest`、`FsTransferRef`、`FsTransferWaitRequest`、`FsTransferCancelRequest`、`FsTransferResumeRequest`、`FsTransferProgressNotification`。握手的 `SupportsTransferOperations` 默认 false，旧宿主不能被推断为支持。`progress` 携带快照，按 `TransferId + Sequence` 丢弃旧帧；至少 100ms 节流，状态变化及时发送，通知丢失用 get/wait 补读，通知不具备 exec 专用严格发送保证。
 - `FakeRemoteFs` 显式配置能力开关和 start/get/wait/cancel/resume 的 Handler，记录独立请求，转发参数及请求令牌；没有 Handler 就明确不支持，不退回现有整文件内存上传。幂等、权限及真正的任务执行由宿主实现，测试脚本须显式模拟，不由替身伪造成功。
 
-此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主/AI 后续接线后才能提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。
+当前宿主在新上传 API 中通过独立单任务租约实施可信确认：读取内容前展示插件、真实会话、本地源、远端路径和覆盖策略，只批准当前任务，不继承终端/开会话许可；AI `Bypass` 不影响宿主确认。缺少授权闸、提示器或桌面窗口时拒绝。插件管理页撤销同步使待批准及活动租约失效并请求取消，提交前重验，查询/后续进度不再泄漏被撤销的元数据；不承诺回滚已经提交的文件。这不扩展到旧同步文件 API，也不代表通用权限 Broker 已完成。
+
+此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主与 AI 的接线使用独立任务提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。当前宿主连接边界不能证明重连后的服务器密钥、账户与远端命名空间一致，因此 `ResumeTransferAsync` 明确报不支持、`CanResume=false`；接口存在不代表恢复已实现，`Unknown` 不自动重传。
 
 ### 3.4 界面与扩展点
 

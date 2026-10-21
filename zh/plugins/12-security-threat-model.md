@@ -1,6 +1,6 @@
 # 12 · 安全与威胁模型
 
-> **现状限定**：下面 v1 强度表/威胁缓解表是蓝图目标，不是对当前全部插件运行模式的安全保证。当前仍有 inProcess 插件，`PluginPermissionGate` 仅覆盖 `terminal.write` / `session.open`；不能从 sudo 的专用宿主确认推出“所有能力经通用 Broker/完整进程隔离/审计均已实现”。本次实际边界见 §1.1。
+> **现状限定**：下面 v1 强度表/威胁缓解表是蓝图目标，不是对当前全部插件运行模式的安全保证。当前仍有 inProcess 插件，`PluginPermissionGate` 覆盖 `terminal.write` / `session.open` 及新上传 API 的专用单任务租约（见 [能力 API §2.1](07-capability-apis.md#21-独立上传任务sdk-211)），不是其它文件操作的通用授权；不能从 sudo 的专用宿主确认推出“所有能力经通用 Broker/完整进程隔离/审计均已实现”。本次实际边界见 §1.1。
 
 ## 1. 信任模型(分层陈述,禁止夸大)
 

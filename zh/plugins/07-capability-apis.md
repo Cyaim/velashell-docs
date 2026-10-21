@@ -52,6 +52,16 @@ public interface IRemoteFs
 传输错峰(插件流量入低优先级队列)、进度回调节流(≥100ms;满格(100%)那一帧只在传输成功后补发一次,失败不发)——吸取
 大文件传输卡顿的历史教训,插件流量不允许灌爆 UI 调度器。
 
+### 2.1 独立上传任务（SDK 2.1.1）
+
+`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
+
+当前宿主每插件最多 4 项实际上传并行、32 项活动/排队任务，保留最多 1024 条生命周期幂等回执；满额明确拒绝新任务，同 id 重取已有回执不受活动额度阻挡。这是资源并发预算，不是文件大小上限。
+
+新上传 API 使用独立的宿主可信确认与单任务授权租约：展示插件、真实会话、本地源、远端目标及覆盖策略，只有批准当前任务或拒绝，不沿用终端/开会话授权。缺少授权闸/提示器/桌面窗口时拒绝；等待确认不阻塞启动 RPC。撤销插件权限会取消待批准及活动上传、阻止后续提交并隐藏新的任务元数据，已进入提交的不确定结果仍按 `Unknown` 处理，不承诺回滚。AI 的 `Bypass` 只跳插件审批，不能绕过该宿主确认。
+
+进度采用 64 位字节计数、单调快照序号、执行代次和明确终态。已写满仍可能正在远端收尾；只有 `Succeeded` 是成功。取消必须指定执行代次，恢复必须重新审批、核对连接身份/源对象/检查点及最终提交结果；不能自动重传不确定副作用。新方法默认明确不支持，能力位 false 时不退回同步大文件上传。这里的契约不等于通用权限 Broker 已实现，实际可用权限与生命周期边界必须按宿主实现说明解读。
+
 ## 3. vela.remoteExec — 远程执行(S5/S6)
 
 走**独立执行通道**，不进用户终端，不污染用户 shell 历史与环境。实际接口是 `IRemoteExecApi`，完整参考见 [SDK §3.3a](../sdk/sdk-reference.md)。
@@ -64,7 +74,7 @@ public interface IRemoteFs
 
 普通与 sudo 流共享每插件 4 条流上限，接收器应同步快速转发，不用 `Progress<T>` 打乱输出顺序。接收器慢了不会中断执行，只会让远端输出跟着慢下来：隔离插件的通知队列满时宿主等它腾出位置，背压经 SSH 窗口传回远端；进程内插件本就在读行线程上同步回调。普通流无换行长输出按最多 4096 字符分片，CR 可分段，超长行带 `[VelaShell: continued]`，因此不要依赖一条回调等于一条完整应用记录。sudo 输出与普通流一样把非 UTF-8 字节替换为 U+FFFD，GBK 日志、二进制内容或非 UTF-8 文件名不会让在跑的 root 命令变成 Unknown。
 
-**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 仅覆盖 `terminal.write` / `session.open`。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
+**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传 API 提供专用单任务租约（§2.1），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
 
 AI 插件的提权审批与宿主确认是两层：`Ask` / `ReadOnlyAuto` 使用独立 `run_command_elevated` 类型、展示目标及整条 root 范围且不设 RepeatKey；缺少审批 Handler 即拒绝，root `cat` 也不能按只读自动放行。用户明确选择 `Bypass` 只跳过插件审批，绝不跳过宿主确认。MCP 无 Handler 时前两模式拒绝，Bypass 可以请求桌面宿主确认。
 
