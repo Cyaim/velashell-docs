@@ -139,6 +139,14 @@ The host still streams file content from a local path rather than embedding it i
 
 See [SDK §3.3b](../sdk/sdk-reference.md#33b-independent-upload-jobs-sdk-211) for DTOs, ownership, recovery and timeout budgets. The contract provides no cross-application-restart recovery and cannot remove remote storage, authorization or network constraints.
 
+### 7.3 Independent download jobs (SDK TBD, unpublished)
+
+Downloads add `fs/transfer/startDownload` (`PluginRpc.FsTransferStartDownload`, `FsTransferStartDownloadRequest`), exchanging only session/source/final destination and `RemoteDownloadOptions`, never file content. `HandshakeResponse.SupportsDownloadOperations` defaults to false, separately from upload support; absence means explicitly unsupported, not a synchronous fallback. Missing snapshot `Direction` means Upload and missing `Phase` means Unknown. Downloads explicitly carry Download and Approval/Transfer/Verification/Commit phases.
+
+Get/wait/cancel, authenticated plugin ownership, the lifetime `OperationId` ledger, monotonic Sequence and generations are shared. Direction is part of idempotency, so reusing an id across directions is rejected. Cancelling start only ends receipt waiting and does not prove nothing started; wait expiry does not cancel downloads. Queries remain authoritative, without a separate download-push promise. Default no-overwrite and successful verification, close and safe commit precede Succeeded; Unknown/TimedOut without stop confirmation must not be automatically redownloaded. Downloads cannot resume. Both directions share 1024 receipts/32 active queued jobs/four actual transfer slots.
+
+Contract and host/AI integration source is written, but the official SDK version remains TBD (replace at release); missing types in the official package block downstream validation. Upload regression results above do not validate downloads. Upgrade central/explicit AI packages and minSdk only after official publication. Safe commit currently supports only Windows fixed local NTFS; Linux/macOS/UNC/other filesystems fail explicitly without a legacy API fallback. See [SDK §3.3c](../sdk/sdk-reference.md#33c-independent-download-jobs-sdk-tbd-unpublished).
+
 ## 8. Development Plan (This Work Item)
 
 | Task | Description | Dependency | Estimate |

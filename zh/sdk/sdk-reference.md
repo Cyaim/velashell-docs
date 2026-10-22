@@ -125,6 +125,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 - 启动、查询、等待、取消和恢复的令牌都只控制**本次请求**；等待到期/请求取消不停止已启动的任务，显式取消意图一经登记不因请求取消而回滚。启动回执丢失时复用同一 `OperationId`，不能另造 id 重传。
 - 任务由宿主持有、归属宿主确认的插件身份，所有访问复核授权。插件侧 AI run/对话隔离仍须另行实施，不能把插件归属当成对话隔离。插件停用、授权撤销、SSH 断线和宿主退出须收尾；无停止确认则为 `Unknown`。只保证当前应用/插件生命周期，不承诺应用重启、插件重新激活或 MCP 会话销毁后仍可恢复。
+- 当前宿主逐组件解析本地源的父目录别名（如 macOS `/var`），末级文件链接仍拒绝；打开后用平台句柄路径核验实际对象，审批与快照显示解析后的路径。幂等回执保留原请求路径，别名后来改向或源路径消失时，同 OperationId 重取不会重新打开文件。路径检查与快照校验不等于对恶意并发写入的原子文件系统快照保证。
 - 首次审批绑定规范化源/目标路径、实际源对象和覆盖策略；宿主检查本地读取与远端写入权限，排队开始前及整个传输期间保持源稳定，防止路径替换、符号链接与并发写入改变已批准内容，无法保证即失败。`Overwrite=false` 必须使用原子无替换提交，不能只在上传前检查存在性。
 - 启动/恢复的 `OperationId` 共用插件生命周期命名空间，记录请求种类和全部参数；操作串行化，先复核授权与去重记录再检查状态，重复请求返回当前快照但不执行。回执/墓碑保留整个生命周期，额度满拒绝新增，不遗忘 id 后重执行；参数冲突抛 `InvalidOperationException`，不存在或不属于本插件的 id 统一抛 `FileNotFoundException`。
 - 快照增加 `Generation`（从 1 开始，每次恢复加一）及 `DestinationCommitConfirmedAbsent`（默认 false）。`CanResume` 还要求确认最终目标未提交；提交回执丢失未消歧时绝不可恢复。重新验证源对象、临时文件归属和检查点；重连通过明确的 `TargetSessionId` 选择连接，宿主核对服务器密钥身份、账户和文件命名空间，仅地址相同不足以恢复。恢复保持 `transferId` 和递增 `Sequence`，清除取消意图与完成时刻，不满足条件拒绝而不从头重传。
@@ -135,6 +136,23 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 当前宿主在新上传 API 中通过独立单任务租约实施可信确认：读取内容前展示插件、真实会话、本地源、远端路径和覆盖策略，只批准当前任务，不继承终端/开会话许可；AI `Bypass` 不影响宿主确认。缺少授权闸、提示器或桌面窗口时拒绝。插件管理页撤销同步使待批准及活动租约失效并请求取消，提交前重验，查询/后续进度不再泄漏被撤销的元数据；不承诺回滚已经提交的文件。这不扩展到旧同步文件 API，也不代表通用权限 Broker 已完成。
 
 此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主与 AI 的接线使用独立任务提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。当前宿主连接边界不能证明重连后的服务器密钥、账户与远端命名空间一致，因此 `ResumeTransferAsync` 明确报不支持、`CanResume=false`；接口存在不代表恢复已实现，`Unknown` 不自动重传。
+
+### 3.3c 独立下载任务（SDK TBD，未发布）
+
+下载契约源码已就位，**正式版本为 TBD，发版时替换**；它不属于上节已发布的 2.1.1。宿主与 AI 接线已编写，但正式包尚缺新类型，下游构建/下载回归受阻，不能宣称整链已可运行或平台矩阵已通过。需要正式发布 SDK 后，由维护者确认版本，升级宿主 `src/Directory.Packages.props`、`tests/Directory.Packages.props`、AI 显式包依赖及清单 `minSdkVersion`；不猜版本、不造本地包或绕过 NuGet。
+
+- `IRemoteFsApi.SupportsDownloadOperations` 和 `HandshakeResponse.SupportsDownloadOperations` 独立于上传能力，默认 `false`；不支持即明确拒绝，不降级旧同步 `DownloadFileAsync`。
+- `StartDownloadAsync(sessionId, remotePath, localPath, RemoteDownloadOptions, ct)` 返回后台任务快照。`RemoteDownloadOptions` 含必填 `OperationId`、`Overwrite=false`、`Timeout=null`（无默认执行死线）；请求令牌只取消本次回执等待，不取消已登记下载。内容按流处理，没有 AI 固定大小上限，继续服从磁盘、权限、用户下载带宽与共享资源预算。
+- 复用 `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` 的所有权、序号和执行代次语义；下载 `CanResume=false`，无断点续传或跨重启恢复。`LocalPath` 始终为最终本地目标，`RemotePath` 为远端源，不暴露临时路径。幂等签名包含方向和全部参数，同 id 换方向/异参拒绝；丢失回执复用原 id，不自动重下未知结果。
+- 快照附加 `Direction`：`RemoteTransferDirection.Upload=0`、`Download=1`；`Phase`：`RemoteTransferPhase.Unknown=0`、`Approval`、`Transfer`、`Verification`、`Commit`。缺失字段兼容默认 Upload/Unknown，既有构造/解构不变。64 位字节计数、速率、ETA 与 `RemoteStopConfirmed` 描述进度；满字节不等于成功，刷新、关闭、校验和提交确认后才是 `Succeeded`。取消不合作的后端可能先报告本地 `Unknown`/`TimedOut` 且 `StopConfirmed=false`，实际退出前保留槽和句柄。
+- RPC 增加 `PluginRpc.FsTransferStartDownload="fs/transfer/startDownload"` 和 `FsTransferStartDownloadRequest`；继续以 get/wait 为权威观察，不新增一套下载推送承诺。`FakeRemoteFs` 分别配置下载能力/处理器并记录启动请求，缺处理器明确不支持。
+- 上传下载共用每插件 1024 生命周期回执、32 活动/排队任务、4 实际传输槽，不因增加下载把总体并发翻倍。旧同步 API、模型上下文读取、聊天附件和 IM 平台附件限制不变。
+
+当前宿主下载使用独立单任务许可，检查远端读/本地写并逐次展示插件、真实会话、源、最终目标及覆盖策略；不借用上传、终端或开会话许可，AI Bypass/保存选择器不能代替可信宿主审批，无窗口/提示器则拒绝。撤权使待审批及活动租约失效并请求取消，提交前重验，后续读取脱敏，取消清理仍可进行；不承诺回滚已提交目标。
+
+**当前安全提交仅支持 Windows 固定本地 NTFS。** 宿主逐段持有禁止写入/删除共享的父目录句柄，拒绝链接/reparse 等不安全对象；在同一文件系统独占 `CreateNew` 随机临时文件，通过持有句柄重命名提交。默认原子无替换，目标中途出现也不覆盖；只有明确批准覆盖才替换，不先删最终目标。Linux/macOS、UNC、非 NTFS/非固定盘及不支持后端明确拒绝，不退回直接写最终路径。用户最终路径不交给旧同步下载；时间戳偏好应用于任务持有的临时句柄。
+
+检查实际长度、传输前后远端元数据，并使用可用的摘要能力；不强制纯 SFTP 账号提供 exec，也不默认第二遍整文件下载。检测源变化则失败，但这些检查**不是远端原子快照保证**。支持范围是当前源码约束，不是已经完成的跨平台或真实 SSH/GUI 验证。AI 生命周期与终态通知见 [自动化与 AI §1.7](../plugins/11-automation-and-ai.md#17-ai-双入口后台下载sdk-tbd未发布)。
 
 ### 3.4 界面与扩展点
 
