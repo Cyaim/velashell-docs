@@ -239,6 +239,8 @@ line saying how many were added this way.
   and import". The price is that new fields go into the file automatically, so `SessionArchiveFieldTests`
   checks by reflection that every property is classified (configuration / secret / local state) and fails on
   any new, unclassified one — it guards against a new secret field being exported in plain text unnoticed
+- Per-session terminal overrides (encoding, terminal type, tab color, tab icon `tabIcon`, …) go into the JSON as-is
+  as the `terminal` object; the fixed 15 CSV columns do not include them
 - Never in the plain part: passwords, key passphrases, plugin secrets (they go into `secrets` if exported at all),
   and the last-connected time (local state)
 - A hand-written file may omit `format` and `id`: a `sessions` array is enough, and entries without an `id`

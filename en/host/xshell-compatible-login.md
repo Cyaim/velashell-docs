@@ -33,8 +33,22 @@ line down to "nothing happens at all".
 (JumpServer Client among them) do send a tab label there:
 `-newtab root@Linux[2026_09_20_09_45_18] -url ssh://JMS-x:one-time@jump-host:2222`. A label contains an `@`, so on
 looks alone it is indistinguishable from a scheme-less URL; a `-newtab` value therefore **must carry `://`** to
-count as a target. `-newtab root@webserver01` is dropped as a label — guessing wrong there means connecting to a
-host that does not exist.
+count as a target. `-newtab root@webserver01` is always taken as a label, never as a target — guessing wrong there
+means connecting to a host that does not exist.
+
+The label becomes the **tab title** of that connection (the SSH terminal, and both the "connecting" placeholder and
+the finished tab of SFTP / FTP documents). The targets jump-server clients send are often all the same jump-host
+address and proxy port, so without the label a row of tabs is impossible to tell apart. The rules:
+
+- the confirmation dialog shows it on a row of its own, "Tab name", under "Credentials", so it is clear which target
+  above the name belongs to;
+- the name is tidied first: surrounding whitespace and quotes are trimmed, control characters and runs of whitespace
+  collapse to one space, and anything past 128 characters is cut (never in the middle of a surrogate pair); an empty
+  result counts as no label;
+- **only the tab changes**: when a saved profile is reused it is not renamed (a rename would be saved along with the
+  last-connected time), the status bar still shows the profile name / the real target, and the audit records are
+  unchanged;
+- single-instance forwarding carries it along, and both ends tidy it.
 
 Three details that are easy to miss:
 
@@ -77,8 +91,8 @@ When the app is already running, that click on the web page starts a **second pr
 "already running" and quitting, it now:
 
 1. fails to take the single-instance mutex, so an instance exists;
-2. hands the request (one-time credential included) to the running instance over a named pipe and waits for a
-   one-byte acknowledgement;
+2. hands the request (one-time credential and tab label included) to the running instance over a named pipe and waits for a
+   one-byte acknowledgement; an older version ignores fields it does not know;
 3. exits silently only once acknowledged — the "already running" dialog is the fallback for a genuine delivery failure.
 
 Both ends use `PipeOptions.CurrentUserOnly`: the ACL is narrowed to the current user on Windows, the socket is 0700
@@ -113,6 +127,7 @@ from somebody else**. Risks and mitigations, item by item:
 | Another user on the machine sniffing or hijacking the forwarding channel | Yes | `CurrentUserOnly` named pipe (Windows ACL / Unix 0700 plus owner check) |
 | The one-time secret leaking into settings, logs or synced data | Yes | See the four guarantees above |
 | External launches bypassing host-key verification | Yes | They do not — external launches reuse the same connection pipeline, so first-fingerprint confirmation and the fingerprint-change decision still apply |
+| A caller-supplied tab label posing as another host (the tab says "prod-db" but the connection goes elsewhere) | Yes | The label is display only and never reaches the profile, the audit log or the trust decision; to see which host it really is, look at the target in the confirmation dialog and at the status bar — both show the real target |
 
 **Recommendations for administrators**
 
