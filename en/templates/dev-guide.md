@@ -551,7 +551,7 @@ string? current = await context.Clipboard.GetTextAsync();
 Runs through the host main window (routed over RPC in isolated mode, with identical semantics). The clipboard often contains user passwords:
 never log or transmit content that you read.
 
-### 5.13 Protocols: Bring Your Own Protocol (File / Terminal)
+### 5.13 Protocols: Plugin-Provided Protocols (File / Terminal)
 
 Lets a plugin provide a **new protocol** that sits on the connection page as an equal of SSH/SFTP/FTP. A protocol comes in two shapes that
 share the same `ProtocolDescriptor` (tab, default port, connection form) and differ only in the implementation passed at registration:
@@ -689,7 +689,7 @@ Quickest start: `dotnet new velaplugin-protocol` (see §2.4).
 
 Complete example: [`plugins/VelaShell.Plugin.Telnet`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Telnet) (RFC 854 negotiation + NAWS + 8-bit transparency, no third-party dependencies).
 
-### 5.14 Workspaces: Non-File Connections of Your Own (Redis / MySQL / Kafka …)
+### 5.14 Workspaces: Plugin-Provided Non-File Connections (Redis / MySQL / Kafka …)
 
 The protocol capability (§5.13) assumes "this protocol looks like a file system". For the ones that **do not** — key-value stores, message
 queues, databases — use the workspace capability: the connection dialog, encrypted credentials at rest, the login prompt, cloud sync, the
