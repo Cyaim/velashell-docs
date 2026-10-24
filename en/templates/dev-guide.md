@@ -672,18 +672,38 @@ The four verdicts and how the host acts on them:
 
 | Verdict | Meaning | Host behaviour |
 | --- | --- | --- |
-| `Unsigned` | No signature block | Allowed by default (first-party / self-installed plugins: trust equals install) |
-| `Trusted` | Valid signature whose key is in the trusted set (with no set configured, any valid signature counts) | Allowed, with a log line |
-| `Untrusted` | Valid signature, key not in the trusted set | Allowed by default; rejected when `RequireTrustedPackageSignature` is on |
+| `Unsigned` | No signature block | The plugin manager asks first; allowed once only after the user clicks “Install anyway”; rejected when `RequireTrustedPackageSignature` is on |
+| `Trusted` | Valid signature whose key is in the trusted set (`TrustedPackageKeys` plus publishers the user has trusted in the plugin manager) | Allowed, with a log line |
+| `Untrusted` | Valid signature, key not in the trusted set (the set starts empty, so a signature seen for the first time lands here) | The plugin manager shows the public-key fingerprint; allowed only after the user clicks “Trust publisher and install”, and the key enters the local trust store once the install has succeeded; rejected when `RequireTrustedPackageSignature` is on |
 | `Invalid` | Signature block corrupt or verification failed | **Always rejected**, regardless of policy — that is tampering, which is far worse than "unsigned" |
 
 The trusted set and the strict switch live on `PluginManagerOptions` (`TrustedPackageKeys` /
-`RequireTrustedPackageSignature`) and are both off by default.
+`RequireTrustedPackageSignature`); out of the box the set is empty and the switch is off.
 
-The command line is one notch stricter: `vela-plugin install` refuses unsigned packages when
-**non-interactive** (pass `--allow-unsigned` to install one anyway) and takes
+On the command line, `vela-plugin install` asks y/N about an unsigned package in an interactive
+terminal and refuses it when **non-interactive** (pass `--allow-unsigned` to install one anyway), and it takes
 `--trust <fingerprint>` so "it must be signed by this publisher" can be written into CI.
-A marketplace UI inside the host, and publisher verification, remain future work per blueprint 10.
+
+**Publisher continuity (only for plugins installed from the plugin manager).** A valid signature only
+proves the package has not been changed since it was signed, not that the signer is the same person as last
+time. So when the plugin manager installs a plugin, its install receipt pins the signer's public key. Any
+later package with the same id (a manually installed `.vpx`, or the row's “Update to x.y.z”) whose signer
+does not match — or which is not signed at all — is neither rejected outright nor let through silently: the
+host shows “Plugin publisher changed” with the pinned and the incoming fingerprints side by side,
+and replaces the plugin only after the user clicks “Install anyway”, pinning the new key as the new baseline.
+When refused, the installed version is left untouched (the check runs before the old version is removed).
+This is trust on first use plus continuity, not marketplace certification — the host has no root of trust.
+
+**Side-loaded plugins cannot pin a publisher.** A plugin installed with `vela-plugin install` / `update`,
+or dropped into the directory directly, has no such receipt; the host only records what it first saw as a
+baseline, with no public key in it — so this check stays silent for them (otherwise a plugin installed from
+the command line could never be updated by any route). The CLI does not compare against the old fingerprint
+in `.vela-install.json` either. The result: **when a package with the same id but a different signer is
+installed over it, the host has no way to stop that impersonating overwrite**; after a restart it just
+records a new baseline. Have users install plugins whose publisher matters from the plugin manager; on the
+command line, pass `--trust <fingerprint>` every time so a package with a mismatching fingerprint is refused.
+Installing over a side-loaded plugin from the plugin manager does not ask “publisher changed” either (there is
+no earlier identity to compare); pinning starts once that install has succeeded.
 
 ### 12.3 Other Install-Time Gates
 

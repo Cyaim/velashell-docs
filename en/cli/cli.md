@@ -101,6 +101,17 @@ post-install tamper detection" buys you.
 > changed files to the host, and the plugin is marked Invalid. Uninstall it in the manager first if
 > you want to switch to the CLI.
 
+> **Side-loaded plugins cannot pin a publisher.** For a plugin installed through the manager, the receipt
+> also pins the signer's public key: when a later package with the same id comes from a different signer
+> (or is not signed at all), the manager shows both fingerprints side by side and replaces the plugin only
+> with the user's approval. A plugin installed from the command line has no such receipt — the baseline the
+> host records holds no public key, so that check stays silent for it — and `install` / `update` do not
+> compare against the old fingerprint recorded in `.vela-install.json` either: a package from a different
+> signer is installed all the same, with the new fingerprint printed. So **when an impersonating package
+> with the same id is installed over it, the host has no way to stop it**; after a restart it just records
+> a new baseline. If that matters, pass `--trust <fingerprint>` every time (see `install` below) so a package
+> with a mismatching fingerprint, or none, is refused — or install through the manager instead.
+
 ### `install`
 
 ```bash
