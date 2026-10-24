@@ -10,7 +10,7 @@
 >   and `VelaShell.Plugin.Templates` (`dotnet new`). There is no `VelaShell.PluginProtocol`
 >   package — the RPC wire protocol lives in the contract assembly (a lightweight
 >   protocol rather than StreamJsonRpc, see the note in 05).
-> - The templates are **`velaplugin` and `velaplugin-ui`**; `velaplugin-automation` waits for the
+> - The templates are **`velaplugin`, `velaplugin-ui`, `velaplugin-protocol` and `velaplugin-workspace`** (the last two are a terminal protocol and a workspace connection type, each with a test project and a local echo server); `velaplugin-automation` waits for the
 >   automation capability domain.
 > - The test double is **`TestPluginContext`**, not `FakePluginContext`; the declarative VelaUI tree
 >   was dropped by product decision, so there is no `VelaUiAssert`.
@@ -38,7 +38,7 @@ in the success of the plugin ecosystem, so this area is treated as a
 | --- | --- | --- |
 | `VelaShell.PluginSdk` | NuGet package | Entry-point conventions, `IPluginContext` and all capability proxies, VelaUI builders, test doubles (`FakePluginContext`) |
 | `VelaShell.PluginProtocol` | NuGet package (automatically included as an SDK dependency) | RPC contracts and DTOs; plugin projects generally do not reference it directly |
-| `VelaShell.Plugin.Templates` | `dotnet new` template package | `velaplugin` (basic), `velaplugin-ui` (with a VelaUI panel), `velaplugin-automation` |
+| `VelaShell.Plugin.Templates` | `dotnet new` template package | `velaplugin` (basic), `velaplugin-ui` (with an Avalonia panel; the declarative VelaUI tree was dropped), `velaplugin-protocol` (terminal protocol), `velaplugin-workspace` (workspace connection type), `velaplugin-automation` |
 | `vela-plugin` | dotnet tool | `new/pack/validate/sign/install/dev` subcommands |
 | Documentation site | docs site (repository Markdown first) | Quick start, API reference (generated from XML comments by DocFX), 3 scenario tutorials (corresponding to the three official samples) |
 | `samples/plugins/` | Repository source | image-viewer / mp3-player / auto-runner, continuously compiled with the SDK; both living documentation and regression tests |

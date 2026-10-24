@@ -23,9 +23,9 @@ Since 2026-08-27 the toolchain is split across three repositories, each versione
 | --- | --- |
 | [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) `src/VelaShell.PluginSdk/` | Contract: entry interfaces, capability interfaces, DTOs, and manifest models |
 | [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) `src/VelaShell.PluginSdk.Testing/` | Test doubles: `TestPluginContext` and in-memory implementations of each capability |
-| [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli) `src/VelaShell.PluginSdk.Build/` | The single NuGet package a plugin project references: MSBuild props/targets plus the bundled packer |
+| [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) `src/VelaShell.PluginSdk.Build/` | The single NuGet package a plugin project references: MSBuild props/targets plus the bundled packer (`VelaShell.PluginSdk.Packer`, same repository; moved over from velashell-plugin-cli on 2026-09-11) |
 | [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli) `src/VelaShell.Plugin.Cli/` | The `vela-plugin` command line tool (validate/pack/sign/dev mount) |
-| **this repository** `src/VelaShell.Plugin.Templates/` | `dotnet new` templates (`velaplugin` / `velaplugin-ui`) |
+| **this repository** `src/VelaShell.Plugin.Templates/` | `dotnet new` templates (`velaplugin` / `velaplugin-ui` / `velaplugin-protocol` / `velaplugin-workspace`) |
 
 The host-side implementation lives in the **main repository** [joesdu/VelaShell](https://github.com/joesdu/VelaShell):
 `src/VelaShell.Infrastructure/Plugins/` (discovery/loading/activation/deactivation and capability bridging),
@@ -69,9 +69,11 @@ dotnet tool install -g VelaShell.Plugin.Cli      # optional, see below
 
 # Create the project (id = acme.snippets)
 dotnet new velaplugin -n Snippets --publisher acme --authorName "Your Name"
-#   velaplugin      basic: entry class + one command
-#   velaplugin-ui   adds an Avalonia panel (AXAML)
-#   --hostMode inProcess|isolated
+#   velaplugin            basic: entry class + one command
+#   velaplugin-ui         adds an Avalonia panel (AXAML)
+#   velaplugin-protocol   a terminal protocol (§5.13.1), with a test project and a local echo server
+#   velaplugin-workspace  a workspace connection type (§5.14), with a test project and a local echo server
+#   --hostMode inProcess|isolated   first two only; protocol / workspace templates are fixed to inProcess
 
 cd Snippets
 dotnet build -c Release -t:PackVpx               # → bin/vpx/acme.snippets-0.1.0.vpx
@@ -232,6 +234,36 @@ It exits with code 1 when it finds a blocking problem, so it fits in CI.
 
 When you do not want to start the host at all, plugin logic runs in ordinary unit tests against
 `TestPluginContext` from `VelaShell.PluginSdk.Testing` (see §7).
+
+### 2.4 Starting from the protocol / workspace templates
+
+When what you are building is a new protocol (the Telnet or serial kind, §5.13.1) or a workspace connection type (the Redis or MySQL
+kind, §5.14), start from `velaplugin-protocol` / `velaplugin-workspace`; what they save you is exactly the parts hardest to get right:
+
+```bash
+dotnet new velaplugin-protocol  -n EchoProto --publisher acme   # terminal protocol
+dotnet new velaplugin-workspace -n EchoDesk  --publisher acme   # workspace connection type
+```
+
+- **What you get**: the plugin project sits at the root (`dotnet build -t:PackVpx` and `vela-plugin dev init` work as with the other
+  templates); `<Name>.Tests/` is a test project (MSTest + `VelaShell.PluginSdk.Testing`, the same version as `.Build`); `tools/EchoServer.cs`
+  is a local echo server. The last two are kept out of the plugin build by `DefaultItemExcludes` and never reach the `.vpx`. There is **no
+  .slnx at the root**: with both a .csproj and a .slnx there, `dotnet build` fails with MSB1011. The parameters follow the other templates
+  (`--publisher` / `--authorName` / `--sdkVersion` / `--pluginId`); **there is no `--hostMode`**, because the protocol and workspace
+  capabilities only exist in-process, and the manifest already says `minSdkVersion: "2.0.4"` (it uses `PluginIcon`).
+- **Trying it**: `dotnet test <Name>.Tests` runs without a host; to see it in the host, run `dotnet run --file tools/EchoServer.cs` in
+  another terminal (`--file` cannot be left out — the file's comments say why; it listens on 127.0.0.1:7007 by default), press F5 to start
+  the debug host (§2.3), and create a connection of the new kind pointing at `127.0.0.1:7007`; what you type (or the lines you send from the
+  panel) comes back.
+- **What to replace** (marked ✏️ in the code): in the protocol template, `BuildDescriptor`, `ConnectionSettings`, `ProtocolTerminal` and the
+  transport inside `ProtocolSession`; in the workspace template, `LineConnection` (swap in your client library — third-party exceptions must
+  not cross the plugin boundary), `WorkspaceView` and `WorkspaceState`. **What to leave alone**: registration, re-registering on a language
+  change, unregistering on deactivation; the disciplines of the read pump / write gate / disconnect-as-EOF / a close that wakes a pending read
+  stay as they are.
+- **The test project has to turn on `EnablePreviewFeatures` itself** (the templates already do): the contract assembly carries
+  `RequiresPreviewFeatures`, and without it you get CA2252. The test output has **no Avalonia runtime** (the SDK package makes Avalonia
+  compile-only, and that flows down the ProjectReference), so tests must not JIT into panel code — the workspace template's
+  `WorkspaceDocument` deliberately touches no Avalonia types so unit tests can drive it fully.
 
 ## 3. Manifest (`plugin.json`) Reference
 
@@ -477,6 +509,10 @@ Discipline:
 
 - The plugin directly handles control events and updates (standard Avalonia style; after `await`, execution returns to the UI thread automatically); update controls from background threads through `Dispatcher.UIThread`.
 - Attach each control instance to only one panel; a panel is a live control and has no concept of refreshing the entire tree.
+- An AXAML view calls the `InitializeComponent()` **generated by the Avalonia source generator**; do not hand-write
+  `private void InitializeComponent() => AvaloniaXamlLoader.Load(this);` any more — overload resolution picks the hand-written one, the XAML
+  still loads, but every `x:Name` field is null and the constructor throws an NRE on first use. (The `velaplugin-ui` template ≤ 2.0.1 does
+  exactly that; the next release fixes it.)
 - Localization is the plugin's responsibility: retrieve translations through `context.Host.Locale` and hot-update on `LocaleChanged`.
 - The host automatically closes all of a plugin's panels when the plugin is deactivated.
 - Complete example (compile-time AXAML + bilingual copy + session/remote execution integration): [`plugins/VelaShell.Plugin.HelloWorld`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.HelloWorld) (DemoPanelView.axaml).
@@ -514,6 +550,235 @@ string? current = await context.Clipboard.GetTextAsync();
 
 Runs through the host main window (routed over RPC in isolated mode, with identical semantics). The clipboard often contains user passwords:
 never log or transmit content that you read.
+
+### 5.13 Protocols: Bring Your Own Protocol (File / Terminal)
+
+Lets a plugin provide a **new protocol** that sits on the connection page as an equal of SSH/SFTP/FTP. A protocol comes in two shapes that
+share the same `ProtocolDescriptor` (tab, default port, connection form) and differ only in the implementation passed at registration:
+
+| Shape | Registration | A session opens | Examples |
+| --- | --- | --- | --- |
+| File protocol | `Register(descriptor, IProtocolFileSystem)` | The dual-pane file browser | S3, WebDAV |
+| Terminal protocol | `Register(descriptor, IProtocolTerminal)` | A terminal tab | Telnet, serial, raw TCP |
+
+File protocols first:
+
+```csharp
+context.Protocols.Register(
+    new ProtocolDescriptor
+    {
+        Id = context.PluginId,               // or $"{context.PluginId}.<sub-protocol>"
+        DisplayName = "S3",
+        Icon = PluginIcon.Stroked(CloudPathData),   // the session tab's icon; a generic plug when omitted
+        DefaultPort = 443,
+        HostLabel = "Endpoint",              // relabels the host / user name / password fields
+        Features = ProtocolFeatures.ServerSideCopy | ProtocolFeatures.AnonymousAccess,
+        Fields = [ new() { Key = "region", Label = "Region", DefaultValue = "us-east-1" } ],
+        Actions = [ new("share", "Copy share link", ProtocolActionScope.File) ],
+    },
+    new MyFileSystem(context));
+```
+
+- **Implementing `IProtocolFileSystem` is enough**: its methods map one to one onto the host's internal remote-file contract, so the
+  dual-pane browser, the transfer queue, throttling, drag and drop and conflict policies all work for you **with no changes**.
+- **The connection form is declarative**: `Fields` describes keys, labels, shapes (text / password / boolean / integer / choice) and
+  defaults; the host renders the controls and hands what the user entered back unchanged in `ProtocolConnectRequest.Settings`. **The plugin
+  writes no connection-dialog UI code at all.** Fields marked `IsSecret` are encrypted at rest together with the password. Too many fields
+  push the dialog off the screen: mark tuning parameters (chunk size, concurrency and the like — with sensible defaults, rarely changed) as
+  `IsAdvanced`, and the host puts them on the connection dialog's "Advanced" page (the "General" page draws only the common fields) with the
+  field count on the tab; when editing an existing profile, a dot appears on the tab as soon as any advanced field differs from its declared
+  default.
+- **Declare mutually exclusive fields with `VisibleWhen`, not with a line of small print**:
+
+  ```csharp
+  new() { Key = "masterName", Label = "Master name", VisibleWhen = new("mode", "sentinel") },
+  new() { Key = "database",   Label = "Default database", VisibleWhen = new("mode", ["standalone", "sentinel"]) },
+  ```
+
+  The condition's shape is **deliberately closed**: the only test is "a key ∈ a set of values" — no expressions, no and / or / not. Once
+  expressions come in, validation, localization and explaining "why did this field disappear" all get out of hand together — that is
+  general declarative UI, which blueprint 08 explicitly does not do; a plugin that truly needs several conditions should split into two
+  connection types. When the condition does not hold the field disappears from the form, but **its stored value is kept and passed back**
+  (the same storage semantics as `IsHidden`): a user who filled in the master name in sentinel mode, switched to standalone for a look and
+  switched back should not find that the UI wiped what they typed. `VisibleWhen` and `IsAdvanced` combine with **and**, and "condition does
+  not hold" wins — a field that does not apply right now must not appear on the "Advanced" page either (nor count on its tab).
+- **The context menu is declarative too**: `Actions` can be drawn in the very frame of the right click; on click the host calls
+  `InvokeActionAsync`, and what happens is up to you (usually opening a `Ui` panel).
+- **No need to throttle progress yourself**: the host already coalesces to ≥100 ms and keeps it monotonic under concurrent out-of-order
+  reports, so report after every chunk.
+- **Throttling comes from the host**: `await context.Protocols.GetTransferOptionsAsync()` returns the global bandwidth limits and the
+  timestamp policy (they are user preferences, not something each protocol should configure); read it **at the start of each transfer**.
+- **Activation runs on the thread pool**: the host pushes the lazy `onProtocol` activation off the UI thread with `Task.Run` (assembly
+  loading and `ActivateAsync` are synchronous stretches), so a bit of blocking initialization in `ActivateAsync` will not freeze the UI —
+  but the 10-second activation limit still applies.
+- **Exceptions have conventions**: `ProtocolAuthenticationException` (the host shows the login dialog again),
+  `ProtocolCertificateTrustException` (the host shows a trust prompt, records the fingerprint and reconnects), `ProtocolConnectionException`,
+  `ProtocolUnsupportedException` (shown as "not applicable" rather than as a failure).
+- **To appear on the connection page before the plugin is loaded**, declare both in `plugin.json`:
+
+```jsonc
+{
+  "contributes": { "protocols": [{ "id": "acme.storage", "displayName": "Acme", "defaultPort": 443 }] },
+  "activationEvents": [ "onProtocol:acme.storage" ]   // loaded only when the user clicks this tab
+}
+```
+
+> **Hard constraint: the protocol capability is `inProcess` only.** Protocols are a high-frequency channel on which the host calls back
+> into the plugin (streaming reads included), while the isolated process's RPC only carries the plugin → host direction. A manifest that
+> declares `contributes.protocols` and asks for `isolated` is rejected at discovery with the reason.
+>
+> **A protocol id cannot change once published** — it lands in users' session profiles, and renaming it means old profiles no longer
+> recognize their protocol. The id must be **all lowercase** `[a-z0-9.-]`, ≤128 characters, and either equal the plugin id or start with
+> `<plugin id>.`; manifest validation and the runtime `Register` share the same check (`PluginManifestReader.IsValidProtocolId`). Forcing
+> lowercase removes case ambiguity — the id is compared in three places (the registry, the UI, the stored profile), and as soon as uppercase
+> is allowed, `Foo.Bar` and `foo.bar` get judged "the same" in one place and "different" in another.
+
+Complete example: [`plugins/VelaShell.Plugin.S3`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.S3) (protocol + two management panels + 22 bucket settings).
+File protocols have no template (S3 is the only first-party one, too few to distil a common skeleton from); the quickest start for a
+terminal protocol is `dotnet new velaplugin-protocol` (see §2.4).
+
+#### 5.13.1 Terminal protocols (`IProtocolTerminal`)
+
+Protocols such as Telnet, serial and raw TCP have no file system; what they have is a **duplex byte channel**. Register it:
+
+```csharp
+context.Protocols.Register(
+    new ProtocolDescriptor
+    {
+        Id = context.PluginId,
+        DisplayName = "Telnet",
+        DefaultPort = 23,
+        // Login happens in-band (the peer prints login: itself): let the host fold away the user name / password fields.
+        Features = ProtocolFeatures.AnonymousAccess | ProtocolFeatures.NoCredentials,
+        Fields = [ new() { Key = "enterMode", Label = "Enter sends", Kind = ProtocolSettingKind.Choice, /* … */ } ],
+    },
+    new MyTerminal(context));      // IProtocolTerminal
+```
+
+Two interfaces are all you implement:
+
+```csharp
+Task<IProtocolTerminalSession> ConnectAsync(ProtocolConnectRequest request, ProtocolTerminalOptions options, CancellationToken ct);
+
+// IProtocolTerminalSession
+ValueTask<int>  ReadAsync(Memory<byte> buffer, CancellationToken ct);        // 0 = session over
+ValueTask       WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct);
+ValueTask       ResizeAsync(int columns, int rows, CancellationToken ct);
+```
+
+- **Move bytes only**: VT parsing, scrollback, search, session logs, session recording and ZMODEM all live on the host side; one more layer
+  of interpretation in the plugin would only fight the host's terminal engine.
+- **Normalize a dropped connection to EOF** (`ReadAsync` returns 0) — **do not throw**. Returning 0 is what leads to "the tab shows
+  disconnected, press Enter to reconnect". The host has a safety net too: if the plugin throws anyway it is treated as EOF.
+- **Serialize the write side yourself**: key presses, size reports (Telnet's NAWS) and negotiation replies are all writes, and interleaving
+  them tears a frame in half. The read side belongs to the host's bridge alone and is never concurrent.
+- **`ResizeAsync` is fire-and-forget**: the host does not wait for it (a window resize can send one every frame); if the protocol has no
+  such mechanism, implement it as a no-op instead of throwing.
+- **`DisposeAsync` must be able to wake a pending read**: when closing a tab the host cancels the read token first and then calls it in the
+  background, but the plugin itself must not block forever on the close path either (a serial port's `Close()` can hang for good when
+  hardware flow control is stuck).
+- A terminal protocol has **no** SessionId: the SFTP panel, task manager, resource monitor and tunnels grey out for it automatically, and
+  "run a command after connecting" is not sent (on Telnet the first thing you see is `login:`, and an injected command would be typed into
+  the login prompt).
+- **Re-register with the same implementation instance on a language change**: the host treats "the same id with a different implementation"
+  as the old implementation going away and closes the open tabs under that protocol; re-registering the same id with the same instance counts
+  as a replacement. **Drop the old registration handle — do not dispose it**: after the replacement it no longer stands for the entry in the
+  registry.
+
+Quickest start: `dotnet new velaplugin-protocol` (see §2.4).
+
+Complete example: [`plugins/VelaShell.Plugin.Telnet`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Telnet) (RFC 854 negotiation + NAWS + 8-bit transparency, no third-party dependencies).
+
+### 5.14 Workspaces: Non-File Connections of Your Own (Redis / MySQL / Kafka …)
+
+The protocol capability (§5.13) assumes "this protocol looks like a file system". For the ones that **do not** — key-value stores, message
+queues, databases — use the workspace capability: the connection dialog, encrypted credentials at rest, the login prompt, cloud sync, the
+session tree and recent connections all reuse what the host already has, and **the plugin only hands over an Avalonia control**.
+
+```csharp
+context.Workspaces.Register(
+    new WorkspaceDescriptor
+    {
+        Id = context.PluginId,               // or $"{context.PluginId}.<sub-type>"
+        DisplayName = "Redis",
+        // A brand logo is usually filled and its view box is not 24 — say both; see SDK reference §3.6
+        Icon = PluginIcon.Filled(RedisLogoPathData, viewBoxSize: 1030),
+        DefaultPort = 6379,
+        HostLabel = "Server address",        // relabels the host / user name / password fields
+        Fields = [ new() { Key = "mode", Label = "Deployment", Kind = ProtocolSettingKind.Choice, … } ],
+        Features = WorkspaceFeatures.AnonymousAccess | WorkspaceFeatures.CertificateTrust,
+        TrustedThumbprintSettingKey = "trustedThumbprint"   // must be an IsHidden field in Fields
+    },
+    new MyWorkspaceProvider(context));
+```
+
+The provider is called when the host opens a session and hands back a document:
+
+```csharp
+internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspaceProvider
+{
+    public async Task<IWorkspaceDocument> OpenAsync(WorkspaceConnectRequest request, CancellationToken ct)
+    {
+        // request.Host/Port/Username/Password are **one-time** credentials; Settings already has defaults filled in.
+        MyConnection connection = await MyConnection.ConnectAsync(request, ct);   // must be connected before returning
+        return new MyDocument(connection);      // the host calls CreateView() once on the UI thread
+    }
+}
+```
+
+- **The form shares one declaration with the protocol capability** (`ProtocolSettingField`): text / password / boolean / integer / choice /
+  **saved SSH profile**, six shapes; tuning fields are marked `IsAdvanced` for the "Advanced" page, and fields that only make sense in some
+  mode are declared with `VisibleWhen` (see §5.13). **The plugin has no connection-dialog UI code at all.**
+- **The "Test" button takes the plugin's own path**: the plugin's handshake is not SSH, and the host will not throw SSH at your port. It
+  branches by declaration — the workspace shape really opens once with `OpenAsync` and immediately calls `DisposeAsync` (building and
+  tearing down the tunnel with it), the file-system shape opens a session and closes it. So `OpenAsync` **must be callable repeatedly with no
+  side effects**; the message of an exception it throws appears verbatim in the dialog, so write it so the user can fix the profile from it.
+- **Declarative SSH tunnels**: declare `WorkspaceFeatures.SshTunnel` on the connection type and give it a field of shape
+  `ProtocolSettingKind.SshSession`, and the host builds the SSH session and the local port forward **before** opening the session, handing
+  the rewritten local endpoint to `OpenAsync` (the real target is in `WorkspaceConnectRequest.Tunnel`, for showing where it comes from); the
+  tunnel is torn down automatically when the document closes. **So the plugin writes no SSH code and never sees a credential** — building
+  the session has to go through the host's existing two-step authentication, fingerprint checks and ProxyJump chain, and "credentials never
+  leave the host" is a hard rule.
+- **Proposing a connection**: `context.Workspaces.ProposeConnectionAsync(...)` makes the host open its own "New connection" dialog
+  pre-filled (for "the plugin discovered some service"). **A plugin cannot write the host's session store itself** — that is user data with
+  credentials inside; it can only propose, and the user looks it over and presses Save. The proposed connection type id must belong to the
+  plugin.
+- **Exception conventions are exactly those of the protocol capability**: `ProtocolAuthenticationException` (the host shows the login
+  dialog again), `ProtocolCertificateTrustException` (trust prompt, record the fingerprint, reconnect), `ProtocolConnectionException`,
+  `ProtocolUnsupportedException`. **Always tell authentication failures apart** — only then does the host show the login dialog again, and
+  "could not connect" is the least useful feedback for "you mistyped the password".
+- **Document lifecycle**: the host calls `CreateView()` once on the UI thread (it returns a `Control`; throwing or returning a non-control
+  only makes that one tab show a line of explanation and never takes the host down); `StatusChanged` drives the status dots on the tab and in
+  the session tree; `ReconnectAsync` backs the tab's "Reconnect"; `DisposeAsync` runs when the user closes the tab or the plugin is
+  deactivated.
+- **Saving / restoring state**: the SDK has no document state contract (`IWorkspaceDocument` has only `CreateView` / `Status` /
+  `ReconnectAsync` / `DisposeAsync`), and the host does not reopen these tabs after a restart. UI state to remember across sessions (drafts,
+  recent sends …) goes into `context.Storage` keyed by **endpoint** (through a tunnel, the real target in `request.Tunnel`).
+  `WorkspaceConnectRequest.SessionId` is freshly assigned on every open and cannot be the key. `OpenAsync` and the "Test" path (Open →
+  Dispose) write no state; only a document that has read state back writes it.
+- **Re-register on a language change, but reuse the same provider instance**: the registry treats "the same id with a different
+  implementation" as the old implementation going away and tells the host to close every open document of that type — the user only switched
+  the language, and the tabs should not all disappear.
+- **To appear on the connection page before the plugin is loaded**, declare both in `plugin.json`:
+
+```jsonc
+{
+  "contributes": { "workspaces": [{ "id": "acme.cache", "displayName": "Acme", "defaultPort": 6379 }] },
+  "activationEvents": [ "onWorkspace:acme.cache" ]   // loaded only when the user clicks this tab
+}
+```
+
+> **Hard constraint: the workspace capability is `inProcess` only.** The host asks the plugin for an Avalonia control to put into the dock
+> area, and native controls cannot be embedded across processes (blueprint 08 dropped HWND adoption). A manifest that declares
+> `contributes.workspaces` and asks for `isolated` is rejected at discovery with the reason.
+>
+> **The id cannot change once published**, with exactly the same rules as protocol ids (all lowercase, prefixed with the plugin id, ≤128
+> characters); the two **share one check and one strip of tabs**, so within one manifest a workspace id must not collide with a protocol id
+> either.
+
+Complete example: [`plugins/VelaShell.Plugin.Redis`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Redis) (keyspace browser + type details + declarative connection form).
+Quickest start: `dotnet new velaplugin-workspace` (see §2.4; it comes with a field for going through an SSH tunnel — delete it by following
+the comments if you do not need it).
 
 ## 6. Isolated Process Mode (`isolated`)
 
@@ -568,6 +833,10 @@ Test doubles: `CollectingLogger`, `InMemoryStorage`, `FakeSessions`, `FakeRemote
 (an in-memory path tree with semantics aligned to the real implementation), `FakeRemoteExec` (scripted responses),
 `RecordingCommands` (use `RunAsync` to drive command bodies), `TestHostEvents` (the `Raise` method),
 `TestHostInfo`, `FakeUi` (records panels and lazy content factories), `FakeSecrets`, and `FakeClipboard`.
+
+The `<Name>.Tests` that `velaplugin-protocol` / `velaplugin-workspace` generate are complete examples of this section (descriptor checks at
+activation, form keys matching parse keys, same instance across a language change, unregistering on deactivation, sending and receiving
+against the local echo server, disconnect as EOF / going Faulted and recovering on reconnect).
 
 ## 8. Deployment, Disabling, and Troubleshooting
 

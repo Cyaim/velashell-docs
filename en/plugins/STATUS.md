@@ -51,7 +51,7 @@ Quality baseline (full regression each round): full-repository build with 0 warn
 | Plugin management page | 02/06 | Sidebar plugin icon → custom-drawn card window (matching the resource-monitoring specification: min/max/close + resize): list/status/enable-disable/**uninstall**/**install from .vpx**/revoke terminal authorization; Changed triggers automatic refresh | PluginManagerEnableDisableTests, PluginInstallUninstallTests |
 | Plugin management page log viewer (2026-10-24) | 02/06 | "View log" on every row: a read-only window showing the tail of that plugin's log (256 KB), with refresh and open-containing-folder; logs live per plugin id at `~/.velashell/logs/plugins/<id>.log`, rotated once at 1 MB. Every source is on the host side, so no new SDK contract is needed: `IPluginLogger` (called directly in-process, relayed over RPC from isolated processes), the isolated process's stdout / stderr, and the activation / activation-failure / crash entries the host records for the plugin; deleted on uninstall, not included in diagnostic bundles | PluginLogFilesTests (including a real fixture plugin in both inProcess and isolated modes), PluginLogViewModelTests |
 | SDK test doubles | 09/13 | `TestPluginContext` + in-memory doubles for all capabilities, allowing plugins to be unit-tested without a host | Dogfooded by HelloWorld tests |
-| Examples and inner development loop | 09 | HelloWorld (AXAML panel/bilingual/all-capability demonstrations); F5 automatically rebuilds the mirror plugin | HelloWorldDemoPanelTests |
+| Examples and inner development loop | 09 | HelloWorld (AXAML panel/bilingual/all-capability demonstrations); F5 automatically rebuilds the mirror plugin. **Protocol / workspace templates (2026-10-24)**: `velaplugin-protocol` / `velaplugin-workspace`, each with a test project and a local echo server (dev guide §2.4) | HelloWorldDemoPanelTests |
 | Developer documentation | 09 | dev-guide.md (sole authority); implementation notes added to blueprints 01–15 | — |
 
 ### ⏳ Partially Complete
@@ -114,7 +114,7 @@ at load time):
 | `VelaShell.PluginSdk` | transitively | Contract assembly (BCL only) |
 | `VelaShell.PluginSdk.Testing` | plugin test projects | `TestPluginContext` and capability doubles |
 | `VelaShell.Plugin.Cli` | dotnet tool | `vela-plugin`: dev init/run/list/prune/link, hosts, doctor, validate, pack, sign, verify, info, unpack, keygen |
-| `VelaShell.Plugin.Templates` | dotnet new | `velaplugin`, `velaplugin-ui` |
+| `VelaShell.Plugin.Templates` | dotnet new | `velaplugin`, `velaplugin-ui`, `velaplugin-protocol` (terminal protocol), `velaplugin-workspace` (workspace connection type); the last two come with a test project and a local echo server |
 
 The Build package handles four things on the plugin project's behalf: `EnableDynamicLoading` and
 `plugin.json` output; keeping shared assemblies (`VelaShell.PluginSdk` and `Avalonia*`, matching

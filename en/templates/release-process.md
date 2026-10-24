@@ -21,17 +21,22 @@ kinds of change, and once they share one number there is no way to do only the f
 | Property (`Directory.Build.props`) | Meaning | Locations |
 | --- | --- | --- |
 | `VelaTemplatesVersion` | **The templates package's own version** — the one in the Release tag | 1: `Directory.Build.props` |
-| `VelaBuildPackageVersion` | Which `VelaShell.PluginSdk.Build` release generated projects reference | 5, see below |
+| `VelaBuildPackageVersion` | Which `VelaShell.PluginSdk.Build` release generated projects reference | 7, see below |
 
-The five locations of `VelaBuildPackageVersion`:
+The seven locations of `VelaBuildPackageVersion`:
 
 | Location | What goes wrong if it is missed |
 | --- | --- |
 | `Directory.Build.props` | The check baseline is wrong, so misses in the places below can no longer be detected |
 | `content/velaplugin/.template.config/template.json` | New projects restore an old package — stopped at build time by `VELA1004` |
 | `content/velaplugin-ui/.template.config/template.json` | Same as above |
-| The `PackageReference` snippet in `docs/dev-guide.md` | **No error**, but the document exists to be copied, and a stale version gets pasted verbatim into other people's projects |
-| The same snippet in `docs-en/dev-guide.md` | Same as above |
+| `content/velaplugin-protocol/.template.config/template.json` | Same as above |
+| `content/velaplugin-workspace/.template.config/template.json` | Same as above |
+| The `PackageReference` snippet in velashell-docs' `zh/templates/dev-guide.md` | **No error**, but the document exists to be copied, and a stale version gets pasted verbatim into other people's projects |
+| The same snippet in velashell-docs' `en/templates/dev-guide.md` | Same as above |
+
+The last two live in another repository and are **optional** locations: the script updates them only when it finds that repository through
+`-DocsRoot` / `$env:VELASHELL_DOCS` / a sibling `../velashell-docs`, and skips them otherwise.
 
 One command changes them all:
 
@@ -150,8 +155,10 @@ So fork PRs and the main branch run exactly the same CI path.
 ## 6. End-to-end smoke test
 
 Before a release, `scripts/Invoke-Smoke.ps1` runs: it installs the freshly packed templates package and, for
-**both templates**, goes through `dotnet new` → restore → `dotnet build -t:PackVpx` → read the container back →
-check whether any shared assembly leaked into the plugin output directory.
+**all four templates**, goes through `dotnet new` → restore → `dotnet build -t:PackVpx` → read the container back →
+check whether any shared assembly leaked into the plugin output directory; for `velaplugin-protocol` / `velaplugin-workspace` it also
+runs the generated test project (`dotnet test`) and checks again that the plugin output directory holds only the plugin's own assembly.
+Adding a template means updating both the template loop in `Invoke-Smoke.ps1` and the list of locations in `Set-Version.ps1`.
 
 **This step is not a formality.** The templates package is a pure content package, and `dotnet pack` succeeding
 proves almost nothing — everything that can really go wrong happens after it has been packed:

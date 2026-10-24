@@ -10,7 +10,7 @@
 | [release-process.md](release-process.md) | **How `velashell-plugin-templates` is released**: the templates package's Release flow, what each of the two version numbers is for, NuGet Trusted Publishing setup |
 
 Repository: [velashell-plugin-templates](https://github.com/VelaShellLabs/velashell-plugin-templates)
-(`dotnet new velaplugin` / `velaplugin-ui` templates).
+(`dotnet new velaplugin` / `velaplugin-ui` / `velaplugin-protocol` / `velaplugin-workspace` templates).
 
 Writing your first plugin, read in this order: [dev-guide.md](dev-guide.md) →
 [CLI manual](../cli/cli.md) → [publishing.md](publishing.md), with the
