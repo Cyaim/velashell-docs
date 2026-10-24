@@ -380,6 +380,17 @@ in [settings-audit.md](settings-audit.md), eleventh batch; what users run into a
 - Active state: `bg-terminal` background + 2px accent bar at the top + `text-primary` text.
 - Inactive state: `tab-inactive-bg` background + `text-tertiary` text + `text-muted` close icon, which becomes prominent only on hover.
 - Connecting tabs use a yellow dot; disconnected tabs use a red dot.
+- **Protocol icon** (since 2026-09-10): after a session tab's status dot comes a 3×12 connection color strip, then a 13px icon. **The color answers “which machine”, the icon answers “which kind”**, and the two are not mixed:
+  the strip and the icon both use the connection's identity color (`ConnectionAccent`: picked automatically from the connection id, or the tab color chosen on the Terminal page), while the glyph follows the connection type —
+  - **SSH terminal**: `square-terminal` (the framed terminal glyph).
+  - **File protocols** (SFTP / FTP document tabs; a dual-pane document uses the left pane's connection): `hard-drive` — the tab holds a file browser, not a terminal.
+  - **Plugin protocols** (a plugin's terminal protocol such as serial / Telnet, file protocol such as S3, or workspace such as Redis): the icon the plugin reports in its descriptor
+    (`ProtocolDescriptor.Icon` / `WorkspaceDescriptor.Icon`, see [SDK §3.6](../sdk/sdk-reference.md#36-tab-icons-pluginicon-sdk-204));
+    if it reports none, or its path fails to parse, the generic plug `plug`. A filled plugin icon is filled with the same identity color.
+  - **Local terminals get no icon**: there is no connection profile, so the icon and its slot are dropped rather than leaving a gap; the strip is transparent.
+  - When the connection picks a **tab icon** in the “Organize” group of its General page, that icon overrides both the type glyph and the plugin's icon; a stored id that is not recognized (added by a newer version, edited by hand) counts as no choice.
+  - Plugin panel tabs (`PanelOptions.Icon`): the icon the plugin reports, `plug` when none, stroked and filled in the accent color `VelaAccent`; when the panel opens as a window, its title bar uses the same icon.
+  The host only knows its own built-in protocols and keeps no “plugin id → icon” table — third-party plugins could never get into such a table, so a plugin hands over its own icon.
 - Width follows the title (#521): the full title when there is room; when one row is too narrow the tab shrinks as described in §4B.3, and **only the title shrinks** (with an ellipsis) — the dot, icons and the button at the end stay as they are.
 - A pinned tab (§4B.5) shows a pin instead of the `x`.
 - Interaction:

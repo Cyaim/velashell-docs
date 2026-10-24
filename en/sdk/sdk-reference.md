@@ -213,7 +213,7 @@ ctx.Theme.Changed += info => { /* Current and Colors are already updated */ };
 ### 3.6 Tab icons (`PluginIcon`, SDK 2.0.4)
 
 The host draws an icon on every session tab based on the connection type (one glyph for SSH,
-another for SFTP / FTP). **A plugin's tab gets a generic plug by default** — the host does not
+another for SFTP / FTP, none for local terminals; see [Interaction and UI Specs §4B.2](../host/interaction-and-ui-specs.md#4b2-individual-tab-content)). **A plugin's tab gets a generic plug by default** — the host does not
 know whether you are Redis or something else, and it should not: a host-side
 "plugin id → icon" lookup table is a table third-party plugins can never get into.
 
@@ -227,6 +227,19 @@ So the plugin hands the icon over itself. **All three places take the same type*
 
 The last one is per-opening rather than per-plugin on purpose: the chat page and the settings
 page opened by the same plugin can each carry their own glyph.
+
+`PluginIcon` has just three fields (`init`, a record type):
+
+| Field | Type / default | Meaning |
+| --- | --- | --- |
+| `PathData` | `string`, **required** | SVG path data; several segments can simply be joined with spaces. If the host fails to parse it, it counts as not given |
+| `ViewBoxSize` | `double`, default `24` | The native view-box size of `PathData` (always 24 for lucide). The host treats a non-positive or non-finite value as 24 |
+| `IsFilled` | `bool`, default `false` | Whether it is a solid, filled shape; `false` renders it stroked |
+
+The plugin does not pick the color: on session tabs (protocol / workspace) the host strokes and fills
+with the connection's identity color (the same as the tab's color strip), and on panel tabs with the
+accent color. When the user picks a tab icon in the connection profile, that icon overrides the one
+the plugin reports.
 
 Two factory methods cover every real case:
 
