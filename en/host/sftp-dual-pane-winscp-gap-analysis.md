@@ -107,7 +107,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | WinSCP capability | VelaShell | Description |
 |---|---|---|
 | **Current-directory filter box** | ❌ None | In a directory with 500 files, finding one requires scanning by eye |
-| **Remote recursive search** | ❌ None | `ISftpService` has no Find/Search API |
+| **Remote recursive search** | ✅ Implemented (2026-10-24) | One `find` / `grep` run over SSH exec (name wildcards, literal content match), and clicking a result locates it in the panel; capped at 500 items / 2 minutes, stoppable. Only on SSH session panels: FTP and plugin protocols have no exec, so the entry points do not appear. See C2 |
 
 ### 3.6 Editing and Viewing
 
@@ -146,9 +146,29 @@ WinSCP's three major synchronization capabilities are now available for SFTP, FT
 ~~Original assessment: zero lines of code; needs a comparison result model, difference calculation, a preview UI, and an execution engine.~~
 By default differences are computed **by SHA-256 first** (digests computed on the server), falling back to size + modification time when that is unsupported or fails (see 7.4).
 
-### C2. Search Capability
+### C2. Search Capability — ✅ Implemented (2026-10-24)
 
-`ISftpService` needs a new recursive search API. Pay attention to the cost of recursively traversing a remote directory. It needs streaming results and cancellation. The existing `ListDirectoryAsync` returns a `List` all at once and is not suitable for direct recursion.
+~~`ISftpService` needs a new recursive search API. Pay attention to the cost of recursively traversing a remote directory. It needs streaming results and cancellation. The existing `ListDirectoryAsync` returns a `List` all at once and is not suitable for direct recursion.~~
+
+In the end it **does not walk the tree through `ISftpService`**: it runs one `find` / `grep` over the SSH session's exec channel, so the
+traversal happens on the server in a single round trip and results stream back one by one (`Core/Sftp/RemoteSearch` + `RemoteSearchService`).
+The rules:
+
+- **Entry points**: on an SSH session's file panel (terminal sidebar, single-pane SFTP document, the SSH side of a dual-remote tab) — the
+  magnifier on the toolbar, "Search remote files…" in the blank-area context menu, and "Search in this folder…" on a folder row (starting
+  there). One modeless window per panel; it closes when the panel is torn down (tab closed, session dropped).
+- **POSIX first**: the remote shell is probed per host and cached; Windows cmd / PowerShell and the csh family get "not supported", and
+  accounts with exec disabled or SFTP only get "could not tell" — in both cases **not a single command is sent**. bash, zsh, POSIX sh and fish
+  can search.
+- **No injection path**: the script body is a fixed constant, and user input is passed only as single-quoted positional parameters
+  (`sh -c '<script>' vela-search '<root>' '<pattern>' …`), quoted by the rules of the login shell.
+- **Only options BusyBox also has**; `/proc`, `/sys` and `/dev` are skipped only when searching from `/`; links are not followed. Names use
+  `find` wildcards (no wildcard means "name contains"), content is a literal match only (`grep -F`), with no regex option.
+- **Limits**: 500 items and 2 minutes, both fixed; hitting either says honestly that the results are incomplete, and the user can stop at any
+  time, closing the window stops it too.
+- Known limits: result paths are decoded as UTF-8, so Chinese names on a GBK server show replacement characters in the results and clicking
+  one only reaches its folder; names containing a newline split into two results.
+- The "current directory filter box" is still missing (3.5).
 
 ### C3. Terminal Integration
 
@@ -179,7 +199,7 @@ Ordered purely by return on investment, for reference:
 
 **Third tier, high cost and differentiation**
 10. ~~**Directory comparison + synchronization** (C1), which determines "whether it can replace WinSCP"~~ — completed on 2026-09-12 (SHA-256-first comparison added on 09-13)
-11. Remote recursive search (C2)
+11. ~~Remote recursive search (C2)~~ — completed on 2026-10-24 (`find` / `grep` over SSH exec; not for FTP / plugin protocols)
 12. Terminal integration (C3)
 13. Timestamp modification (symbolic links were completed on 2026-09-12, chown on 2026-09-30)
 14. Post-transfer verification
@@ -257,7 +277,7 @@ Execution rules:
   - Also applies in timestamps mode: files whose digests differ are never re-stamped, so the difference is not hidden.
   - Digests are cached by "path + size + modification time" until the window / document closes, so the automatic re-check after a sync only re-hashes the files just transferred (which doubles as post-transfer verification).
   - "Compare Directories" also compares by SHA-256 first, and appends a hint to its verdict when it had to fall back.
-- **Time precision**: both sides are truncated to the coarser precision before comparing. SFTP has seconds; FTP's Unix LIST only has minutes (and only a date for files older than six months), inferred from the raw value. Tolerance is 1 second (absorbs FAT/exFAT's 2-second granularity).
+- **Time precision**: both sides are truncated to the coarser precision before comparing. SFTP has seconds; FTP's Unix LIST only has minutes (and only a date for files older than six months), inferred from the raw value. Tolerance is 1 second (absorbs FAT/exFAT's 2-second granularity). When an FTP connection has a server time zone set, LIST times are shifted by that offset first, and day-level comparisons truncate both sides in **the server's calendar** (LIST gives only the server's local date for files older than six months, and truncating in the local calendar would put a file changed in the evening on the neighboring day).
 - **Case**: on Windows / macOS paths are paired case-insensitively; two remote names that differ only in case are marked as a conflict and left alone.
 - **Type conflicts**: a file on one side and a directory on the other is a conflict, and nothing below it is compared (otherwise "Delete files" would remove a tree nobody meant to touch).
 - **Links**: neither side descends into links to directories (the number skipped is reported; same rule as folder downloads). Remote links to files are treated as files. Locally only real symbolic links and junctions are skipped; OneDrive "Files On-Demand" placeholders take part as usual.
@@ -266,7 +286,7 @@ Execution rules:
 
 - **Cost of SHA-256**: same-size files are read in full on both sides (the local disk and the server's disk), so the first comparison of a large tree is noticeably slower; uncheck it when not needed. The cache does not outlive the window: a file whose content changed while its size and modification time did not (a deliberate `touch -r`) reuses the old digest on a second comparison in the same window.
 - Sync options are remembered only within the same document tab, not saved to settings, and reset after a restart.
-- **FTP time zones**: LIST times are given in the server's local time and interpreted in the client's time zone. When the server and the client are in different zones, time comparisons are shifted as a whole — compare by file size only in that case. WinSCP offers a "time zone offset" in its session settings; VelaShell does not yet.
+- ~~**FTP time zones**: LIST times are given in the server's local time and interpreted in the client's time zone. When the server and the client are in different zones, time comparisons are shifted as a whole — compare by file size only in that case. WinSCP offers a "time zone offset" in its session settings; VelaShell does not yet.~~ — resolved on 2026-10-24: set "Server time zone" on the FTP connection's Advanced page (`FtpSettings.ServerUtcOffsetMinutes`, the UTC offset of the server's clock; the default "Same as this computer" is the old behavior). Only the server wall-clock times LIST gives are shifted; MLSD / MLST times are UTC already and used as-is; the file panel's time column still shows the server's own clock. The sync window (including keep remote up to date) and "Compare folders" in single-pane and dual-remote tabs all use it. What remains: a fixed offset does not follow the server's daylight saving time, so it has to be changed by hand for that half of the year (WinSCP is the same).
 - FTP servers without `MFMT`, and plugin protocols, cannot align the remote time after an upload. One-way Local → Remote is unaffected (a newer remote file is not treated as something to upload), but **two-way sync would download the just-uploaded files back**; the window warns about this.
 - "Keep up to date" is Local → Remote only (as in WinSCP).
 

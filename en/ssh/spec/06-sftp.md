@@ -323,6 +323,11 @@ Names used to be decoded leniently: undecodable bytes became U+FFFD, and re-enco
 〔Decision〕**The server's encoding can be specified** (`SftpOptions.FileNameEncoding`, e.g. GBK): names are decoded and encoded with it so they display correctly; bytes invalid in that encoding are not guaranteed to round-trip.
 Path arguments, directory entry names and `longname`, and the results of `READLINK` / `REALPATH` all go through the same codec; status messages and extension names are not file names and stay UTF-8.
 
+The host (since 2026-10-24) passes `FileNameEncoding` from the session's character set at connect time (the connection's terminal encoding
+override first, otherwise the global terminal encoding; only on the final hop); when the character set is UTF-8, blank or unrecognized it
+passes **nothing**, keeping the default lossless round trip above. When it does pass one, only that option changes and everything else stays
+at the library defaults.
+
 ---
 
 ## 5 Request pipeline
