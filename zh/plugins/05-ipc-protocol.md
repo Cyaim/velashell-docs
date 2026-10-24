@@ -176,7 +176,7 @@ SDK 契约、严格发送/半帧失败回归，以及正式 SDK 2.1.0 装配后�
 
 共用 get/wait/cancel、插件身份绑定、`OperationId` 生命周期账本、单调 Sequence 和执行代次；方向也是幂等参数，同 id 换方向拒绝。启动请求取消只停止回执等待，不能推出任务没启动；短 wait 到期不取消下载。查询为权威来源，不承诺独立下载推送。默认不覆盖，只有校验、关闭和安全提交确认后才 Succeeded；Unknown/TimedOut 且未确认停止不自动重下。下载不支持 resume。上传下载合用原 1024 回执/32 活动排队/4 实际传输预算。
 
-契约源码与宿主/AI接线已编写，SDK 正式版本仍 TBD（发版时替换），下游受正式包缺新类型阻塞，不能将上节上传回归结论套用于下载。正式发布后才升级中央/AI显式包与 minSdk；安全提交当前仅 Windows 固定本地 NTFS，Linux/macOS/UNC/其它文件系统明确拒绝，不回退旧 API。完整边界见 [SDK §3.3c](../sdk/sdk-reference.md#33c-独立下载任务sdk-tbd未发布)。
+契约源码与宿主/AI接线已编写，SDK 正式版本仍 TBD（发版时替换），下游受正式包缺新类型阻塞，不能将上节上传回归结论套用于下载。正式发布后才升级中央/AI显式包与 minSdk；安全提交支持 Windows 固定本地 NTFS 与 Linux/macOS（x64、arm64）的本地文件系统，UNC/9p/SMB/FUSE/NFS 等其它文件系统明确拒绝，不回退旧 API。完整边界见 [SDK §3.3c](../sdk/sdk-reference.md#33c-独立下载任务sdk-tbd未发布)。
 
 ## 8. 开发计划(本分项)
 
