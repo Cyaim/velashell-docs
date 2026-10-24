@@ -738,6 +738,17 @@ set to `Reject` / `AcceptAndPersist`, the callback would never be called — set
    The reason is the same as §5.4 item 2: otherwise a man-in-the-middle only has to present a plain key and `accept-new` records it quietly —
    and configuring a CA for a host is precisely about no longer relying on blind trust the first time. For a host that really has no certificate, verify the fingerprint and add its key to `known_hosts` on its own.
 
+**The host side (2026-10-24).** The host's `VelaHostKeyPolicy` does not use `KnownHostsPolicy`, and does not read `~/.ssh/known_hosts` on every
+connection: trusted CAs and revocation records live in the host's own trust store (SonnetDB `known_host_markers`), put there by the user
+importing a known_hosts file in Settings or pasting a whole `@cert-authority` / `@revoked` line. To decide, it turns those records and the
+trusted hosts into the library's `KnownHostEntry` and hands them to `KnownHostsFile.Lookup`, so negation, hashing and the certificate's type /
+signature / validity / principals / critical options all follow the library, in the same order as above: a revocation beats everything → a
+key recorded on its own comes first → a valid certificate signed by a matching CA is let through (not recorded among trusted hosts) → an
+invalid one is rejected → a CA-managed host presenting an unendorsed key is rejected, without asking or recording — whatever the host's
+"confirm on first connection" and "block on change" switches say, and on automatic reconnects too. If the CA / revocation records cannot be
+read it fails closed; while ordering host key algorithms an unreadable store is ignored. With a matching CA the host likewise reports the
+certificate types, so certificate algorithms move to the front.
+
 **Rekeying** pins the whole `K_S` from the first exchange (§8.4); a changed certificate is treated as a changed host key.
 So on rekey the host key algorithm list keeps only algorithms of the pinned key's **type and certificate-ness** (certificate stays certificate, plain stays plain):
 when a certificate is pinned, the plain algorithm also looks "supported" once the suffix is stripped, and negotiating it would make the server present its plain key instead of the certificate — the pin fails and the connection is dropped as a changed host key.

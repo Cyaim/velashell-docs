@@ -176,7 +176,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | File Transfer | Bandwidth Limits | Master switch, upload limit, download limit | Hide both rate fields when disabled |
 | File Transfer | Transfer Logs | Record logs, retention days, storage path | Hide subordinate settings when logging is disabled |
 | File Transfer | Resume and Retry | Interrupted transfer resume, transfer retries, clean up temporary files | All three are implemented and shown, in the "Conflict handling" group: resume interrupted transfers (M-02), clean up partial files (only while resume is off, R-10), retry failed transfers (R-09, eighteenth batch) |
-| Security and Privacy | Host Identity Verification | Confirm fingerprint on first connection, block on fingerprint change | Explain first trust and change policies together |
+| Security and Privacy | Host Identity Verification | Confirm fingerprint on first connection, block on fingerprint change; trusted hosts (the list, OpenSSH known_hosts import / export, hash host names on export), trusted host CAs | Explain first trust and change policies together; actions on trusted hosts and trusted host CAs apply immediately and are not tied to "Save" (twentieth batch) |
 | Security and Privacy | Clipboard Permissions | OSC 52 write permission | Recommend Deny or Ask every time by default |
 | Security and Privacy | Credentials | Remember password, master password protection | If "Remember password" is placed on the connection page, provide only a link here and do not duplicate the control |
 | Security and Privacy | Security Alerts | In-app notifications, security alert sound, Webhook, Webhook URL | Show the URL only after Webhook is enabled |
@@ -747,3 +747,25 @@ the startup-check path. Behavior: [message-center-and-feed.md](message-center-an
   updates downloads anyway and is not governed by this switch.
 - Along the way: if the settings snapshot is not cached yet when the startup round checks for updates, the settings are now actually read
   first — the old `new()` fallback could treat someone who had turned "Check for updates on startup" off as the default (on) and send a request.
+
+### 2026-10-24 Twentieth batch (Security & Audit page: known_hosts interop and trusted host CAs)
+
+The SSH library has long implemented host certificates and `@cert-authority` ([03-key-exchange.md](../ssh/spec/03-key-exchange.md) §5.5),
+but the host's trust store had no notion of a trusted CA, and trusted hosts could only be listed and deleted. The Security & Audit page gains
+two OpenSSH interop items in the "Trusted hosts" section, followed by a new "Trusted host CAs" section. Interaction:
+[interaction-and-ui-specs.md](interaction-and-ui-specs.md), the Security & Audit row of §14 and §15.
+
+| Setting / action | Default | Values | Notes |
+| --- | --- | --- | --- |
+| OpenSSH known_hosts | — | "Import…" and "Export…" buttons | Import: multiple hosts, `[host]:port` and negation on one line are understood; `\|1\|` hashed lines are matched one by one against saved SSH / SFTP connections and trusted hosts, and the unmatched ones are counted; plain lines with wildcards are skipped and counted; a different key already stored for the same type is not overwritten (counted as a conflict); `@cert-authority` / `@revoked` lines go to Trusted host CAs below; plain lines for revoked keys are not imported; unknown markers skip the whole line. **It only adds, never changes.** Export: OpenSSH format; old records that have only a fingerprint and no stored public key are counted separately (filled in the next time the host is trusted on connect) |
+| Hash host names on export | Off | On / Off | Like `HashKnownHosts yes`: host key lines are written as `\|1\|…`, while the patterns on `@cert-authority` / `@revoked` lines are written as-is. **Not persisted**; it is off again every time the settings open |
+| Trusted host CAs | Empty | The list of CA / revocation records (tagged "CA" or "Revoked", deletable) + an add form (host name patterns + the CA's `.pub` line, or a whole `@cert-authority` / `@revoked` line copied from known_hosts, with an optional comment) | Stored in the SonnetDB `known_host_markers` collection and applied by host name pattern. A matching host presenting a valid certificate signed by one of these CAs is let through without being recorded among trusted hosts; a host covered by a CA that presents an unendorsed key or an invalid certificate is rejected outright, never falling back to first-connection confirmation — whatever "Require manual fingerprint confirmation on first connect" and "Block and alert on fingerprint change" say |
+
+- **Applies immediately, not tied to "Save"**: the same approach as the trusted-host list — this is trust data, not a preference. Importing
+  adds trusted-host records, and that table reloads right after the import.
+- **Revocations come only from import or a pasted full line**: pasting an `@revoked …` line into the form creates a revocation record; there
+  is no "trust this CA" button in the confirmation dialog — trusting a CA from the certificate a server presents is trusting blindly.
+- Trusted CAs are not read from `~/.ssh/known_hosts` on every connection; they live only in the host's own trust store. To share them with
+  the command-line ssh, import once.
+- Trusting a host now also records its public key (only the fingerprint was stored before); older records get it the next time they are
+  trusted on connect, and only then can the export write a host key line for them.

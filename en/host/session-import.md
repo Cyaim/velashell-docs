@@ -1,7 +1,8 @@
 # Session Import
 
-> Updated 2026-10-09. Three migration sources: **Xshell**, **WinSCP**, and OpenSSH **`~/.ssh/config`**;
-> plus VelaShell's own connection files (**JSON / CSV** import and export, section 7, joesdu/VelaShell#571).
+> Updated 2026-10-24. Three migration sources: **Xshell**, **WinSCP**, and OpenSSH **`~/.ssh/config`**;
+> plus VelaShell's own connection files (**JSON / CSV** import and export, section 7, joesdu/VelaShell#571), and export back to
+> **OpenSSH config** (7.7).
 > 中文:[`../../zh/host/会话导入.md`](../../zh/host/会话导入.md)
 
 Migrating from another tool happens exactly once, and it happens while the user still knows
@@ -119,11 +120,27 @@ would import nothing at all.
 | `User` | User name | Defaults to empty (asked at connection time) |
 | `IdentityFile` | Private key path + `AuthMethod.PrivateKey` | `~` and `%d` `%u` `%h` `%r` `%%` are expanded by the SSH library (`SshHostConfig.ExpandIdentityFiles`, the same expansion used when reading keys to connect; 〔History〕the host used to expand them itself, recognizing only `~` / `%d` and leaving `%h` in the path as-is); relative paths are resolved against `~/.ssh`. **Existence is not checked** — the key may not have been copied over from the other machine yet, and carrying the path into the profile is more useful than dropping it silently; `none` counts as unset |
 | `ProxyJump` | Jump-host link (`JumpHostProfileId`) | See below |
+| `CertificateFile` | Certificate path + `AuthMethod.Certificate` | `CertificateFile` is set, or a `<key>-cert.pub` really exists on this machine next to an `IdentityFile` (OpenSSH reads that file too) → certificate authentication; nothing is guessed when it does not exist. The paired key: the `IdentityFile` named like the certificate (minus `-cert.pub`) first, otherwise the first one, and with none at all it is inferred from the certificate path by the naming convention. A VelaShell connection uses one authentication method, so extra keys are listed in the import notes |
+| `IdentityAgent` | `AuthMethod.Agent` | With no key and no certificate, pointing at the default agent (the one `SSH_AUTH_SOCK` names) → SSH agent authentication; `none` means no agent; pointing at a different agent socket is not imported (it goes into the import notes) |
+| `KexAlgorithms` / `HostKeyAlgorithms` / `Ciphers` / `MACs` | The connection's custom algorithm lists | The `+` / `-` / `^` syntax comes across as written (a connection's custom lists use the ssh_config syntax anyway); names this version does not implement are dropped with a note, and a list that is misspelled, or empty once they are dropped, is not imported |
+| `Compression` | Compression | Carried over |
+| `ForwardAgent` | Agent forwarding | `yes` (or pointing at the default agent) is carried over; pointing at a different agent socket is not imported — VelaShell only forwards the default agent, and the config's author deliberately gave this host a different one, so swapping in the default would hand over more keys |
+| `LocalForward` | Local forward tunnel | Each side may be a port or a Unix socket (a side containing `/` is a socket and goes into `LocalSocketPath` / `RemoteSocketPath`). With no listen address it binds 127.0.0.1 (0.0.0.0 with `GatewayPorts yes`); `*` means all interfaces |
+| `RemoteForward listen target` | Remote forward tunnel | Two TCP sides, or two sockets (the server listen path goes into `RemoteSocketPath`, the local target into `LocalSocketPath`); only one side a socket is skipped (the SSH library offers just these two combinations and the tunnel service refuses the mix too). With no listen address the server decides (loopback) |
+| `RemoteForward [address:]port` (no target) | Remote dynamic SOCKS tunnel (`RemoteDynamicForward`) | The listen address defaults to 127.0.0.1; the allow list comes from the host's `PermitRemoteOpen`; there is no remote dynamic forward on a socket, so that is skipped |
+| `PermitRemoteOpen` | Allow list of remote dynamic forwards | One per host, shared by all of that host's remote dynamic forwards, validated by the same rules as the tunnel form. **When it is missing, those forwards are not imported**: OpenSSH then treats it as `any`, but a tunnel's allow list has no default — write `any` to allow everything; `none` and invalid values are skipped too |
+| `DynamicForward` | Dynamic forward (SOCKS) tunnel | Listen-address rules as for `LocalForward` |
 
-**Every other keyword is ignored**: `LocalForward` / `RemoteForward` (port forwards do not
-travel with a session import), `ServerAliveInterval`, `ForwardAgent`, and so on. They either
-live somewhere else in VelaShell or the host does not support them yet — dropping them is
-deliberate, because importing half a config invites worse assumptions than importing none of it.
+**Forwards become tunnels of that connection**, always **stopped** (VelaShell has no "start tunnel with the connection" option); start them
+from the tunnel panel. With `ClearAllForwardings yes` none are imported; port 0 (a port decided at connection time) is not imported; local
+socket paths must be usable on this machine — a leading `~` is expanded, the path must be absolute and within the `sun_path` limit (107 bytes,
+103 on macOS), and server paths must start with `/`; anything else is skipped. Lines are parsed one by one, so one bad line does not take
+others down with it.
+
+**Every other keyword is ignored**: `ServerAliveInterval`, `ForwardX11` (OpenSSH's `ForwardX11Trusted` default is not the same thing as
+VelaShell's "Trusted", so it is not forced into it), and so on. They either live somewhere else in VelaShell or the host does not support
+them yet. What the table above marks as skipped or not imported is not dropped silently: it goes into the row's **import notes** (section 4),
+so the user sees what did not come across and why.
 
 ### 3.5 Three judgement calls in `ProxyJump`
 
@@ -143,7 +160,7 @@ Parsing accepts `user@host:port` and bracketed IPv6; alias matching looks at the
 
 ## 4. Credential status in the preview rows
 
-In custom-selection mode each row carries a credential status (four states, all five resx files
+In custom-selection mode each row carries a credential status (six states, all five resx files
 in sync):
 
 | State | Meaning |
@@ -151,11 +168,17 @@ in sync):
 | Recovered | The password was decrypted; the imported session gets "remember password" and is re-encrypted with AES at rest |
 | Password needed | The source holds a password that could not be decrypted (master password, a changed Windows account, …); the session still imports |
 | **Uses key file** | The session authenticates with a private key (from `IdentityFile`) |
+| **Uses certificate** | The session authenticates with a certificate (from `CertificateFile`, or the `-cert.pub` next to the key) |
+| **Uses SSH agent** | The session authenticates through the agent (from an `IdentityAgent` pointing at the default agent) |
 | No password | The source never stored one |
 
-The third state arrived with SSH config support: telling the user "no password" about a session
+The last three states arrived with SSH config support: telling the user "no password" about a session
 configured with an `IdentityFile` is **misleading** — it is not missing a credential, its
 credential is of another kind.
+
+Below the name and address there may also be a grey line of **import notes**: how many tunnels the forwards became, and the settings
+that could not be mapped and were skipped (forwards on port 0 or with only one socket side, remote dynamic forwards without an allow list,
+other agent sockets, algorithms this version does not implement, extra keys), one per line.
 
 When a source has a master password enabled, the dialog shows one warning across the top:
 **passwords in a master-password vault cannot be recovered; only the sessions come across**.
@@ -167,7 +190,9 @@ Unsupported protocols (WebDAV and the like) cannot be ticked and show their orig
    `DetectDefaultSource`, `ScanAsync`, `ImportAsync`
 2. Write through `SessionImportWriter` (`Infrastructure/Import/`) — group creation,
    deduplication, password re-encryption, `IdentityFile` → key auth and `ProxyJump` → jump-host
-   links all live there
+   links all live there, as do the authentication method (certificate / agent) with the certificate path, the protocol options
+   (`Ssh`: algorithm lists, compression, agent forwarding) and forwards → that connection's tunnels (written to the `tunnels`
+   collection through `IAppDataStore`)
 3. **Append one line** of DI registration in `InfrastructureServiceCollectionExtensions`
 
 The dialog needs no changes at all: it enumerates `IEnumerable<ISessionImportService>`.
@@ -206,6 +231,9 @@ and "Export selected…" on the multi-select menu (UI details in
 | Content | the complete connection (`SessionProfile` serialized as is) + its group + the shared credentials it references + port-forwarding tunnels | common fields: id, name, group, protocol, host, port, username, auth, password, private key, certificate, shared credential, jump host, tags, notes |
 | Sensitive data | not exported by default; including it requires an export passphrase and encrypts the whole section (7.3) | never exported; an import may carry a `password` column |
 | Encoding | UTF-8 without BOM | exported as UTF-8 **with** BOM (without it Excel opens the file in the local code page and every Chinese character turns into mojibake); import is covered in 7.4 |
+
+The export dialog has a third format, **OpenSSH config** (export only, it cannot be imported back; importing `~/.ssh/config` is section 3),
+see 7.7.
 
 An export covers the connections the user picked **plus their jump hosts** (all the way up the chain).
 Exporting the machines behind a bastion without the bastion itself makes all of them direct connections
@@ -361,9 +389,38 @@ The rules are pure functions in `Core/Import/`: `SessionArchiveBuilder` (export 
 the computed result back; the three dialogs' view models live in the host's `ViewModels/` (`SessionExportViewModel` /
 `SessionFileImportViewModel` / `SessionBatchEditViewModel`).
 
+### 7.7 Exporting as OpenSSH config (2026-10-24)
+
+The export dialog's third segment, "OpenSSH config" (`SessionFileFormat.SshConfig`, **export only**), writes the selected connections as `Host`
+blocks that can be pasted straight into `~/.ssh/config`, so the command-line ssh shares the same list of connections. The implementation is
+`Infrastructure/Import/SshConfigExporter`, the reverse of the import in section 3, writing the same keywords the import understands.
+
+- **Scope**: SSH / SFTP only, one `Host` block per connection; FTP and plugin protocols are skipped and counted. Jump hosts come along by the
+  rule in 7.1, and `ProxyJump` refers to them by alias.
+- **Aliases**: the connection name (the host when there is none), with whitespace and characters that mean something else in ssh_config
+  replaced by `-`, and a number appended to duplicates.
+- **What is written**: `HostName` / `Port` / `User` / `IdentityFile` / `CertificateFile` / `ProxyJump` / `Compression` / `ForwardAgent` /
+  `ForwardX11` / the four algorithm lists / the three kinds of forward. Connections that use a shared credential get the credential's material
+  (a user name set on the connection wins, as when connecting). Paths under the home directory are written as `~/…`, so they still resolve on
+  another machine.
+- **"Allow legacy algorithms"** has no ssh_config switch: a category without a custom list is written as `+legacy algorithms`; one written with
+  `+` is merged into a single line; one written with `-` / `^` (OpenSSH allows only one prefix per line) is written as the computed full list.
+- **Forwards**: tunnels are written back as the three forward keywords, with the socket side as a path; a remote dynamic tunnel becomes a
+  target-less `RemoteForward` and **is always written together with `PermitRemoteOpen`** — without it OpenSSH allows `any`, so one missing
+  line would widen a tightened list to everything. A host can carry only one `PermitRemoteOpen`: remote dynamic tunnels whose list differs from
+  the first one, remote dynamic tunnels with an empty list, and remote forwards with only one socket side are written as
+  `# <the original line>  (VelaShell: <reason in English>)` comments instead of taking the union (a union would loosen the stricter one); the
+  comments are not read back on import.
+- **No passwords or passphrases** (ssh_config never holds them); UTF-8 without a BOM, `.conf` by default. The completion message says how many
+  connections were exported and that no passwords are included.
+
 ## 8. Not done yet
 
-**Export in the other direction**: writing VelaShell sessions back into `~/.ssh/config`. It
-belongs with "`known_hosts` interoperability with OpenSSH"; see
-[`feature-plan.md`](https://github.com/joesdu/VelaShell/blob/main/feature-plan.md) in the code
-repository.
+- Exporting back to `~/.ssh/config` is done (7.7); `known_hosts` import and export live under Settings → Security & Audit → Trusted hosts (see
+  the twentieth batch in [settings-audit.md](settings-audit.md)).
+- `IdentityAgent` / `ForwardAgent` pointing at a **non-default agent socket** are not imported: that needs a per-connection agent endpoint
+  setting first.
+- `ForwardX11` is not imported: OpenSSH's `ForwardX11Trusted` default and VelaShell's "Trusted (`-Y`)" follow different rules, and forcing one
+  onto the other would silently change the trust level.
+
+The rest is scheduled in [`feature-plan.md`](https://github.com/joesdu/VelaShell/blob/main/feature-plan.md) in the code repository.

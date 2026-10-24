@@ -23,6 +23,7 @@ compatibility layer.
 | Bare URL | `VelaShell.exe ssh://root@10.0.3.21` | Some callers put the URL straight into the first argument |
 | Session file | `VelaShell.exe -f C:\Temp\session.xsh` | Reads the UTF-16 `.xsh` for host / port / user / protocol |
 | Explicit options | `-l <user>` `-p <port>` `-pw <password>` `-i <keyfile>` | Override the matching URL fields, same precedence as Xshell |
+| User certificate | `-i C:\keys\id_ed25519 -cert C:\keys\id_ed25519-cert.pub` | PuTTY's `-cert` (PuTTY user manual 3.11.3.19): the OpenSSH user certificate paired with the `-i` key; with it the connection uses certificate authentication. Without `-i`, the key is inferred from the `<key>-cert.pub` naming convention and used only if that file really exists. A certificate counts as "credentials supplied with the request" (for the confirmation dialog and for whether a saved profile is reused). Xshell's `.xsh` / command line and `ssh://` have no documented certificate field, so nothing is guessed |
 
 When one command line offers several candidate targets, they are taken in the order **`-url` > bare URL >
 `-newtab`**, and they are tried **one after another**: if the higher-ranked one yields no host, the next is tried,
@@ -91,7 +92,7 @@ When the app is already running, that click on the web page starts a **second pr
 "already running" and quitting, it now:
 
 1. fails to take the single-instance mutex, so an instance exists;
-2. hands the request (one-time credential and tab label included) to the running instance over a named pipe and waits for a
+2. hands the request (one-time credential, certificate path and tab label included) to the running instance over a named pipe and waits for a
    one-byte acknowledgement; an older version ignores fields it does not know;
 3. exits silently only once acknowledged — the "already running" dialog is the fallback for a genuine delivery failure.
 

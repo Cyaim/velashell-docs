@@ -737,6 +737,14 @@ ValueTask<SshHostKeyVerdict> EvaluateAsync(SshHostKeyContext context, Cancellati
    理由与 §5.4 的第 2 条相同：不这样的话，中间人只要出示一把普通钥，`accept-new` 就会把它悄悄记下 ——
    而给主机配 CA，要的正是「不再靠第一次盲信」。确实没有证书的主机，核对指纹之后把它的钥单独加进 `known_hosts`。
 
+**宿主那一侧（2026-10-24）。**宿主的 `VelaHostKeyPolicy` 不用 `KnownHostsPolicy`，也不在每次连接时读 `~/.ssh/known_hosts`：
+受信 CA 与吊销记录存在宿主自己的信任库里（SonnetDB `known_host_markers`），由用户在设置里导入 known_hosts 或粘贴整行
+`@cert-authority` / `@revoked` 得来。裁决时把这些记录与已信任主机换成库的 `KnownHostEntry` 交 `KnownHostsFile.Lookup`，
+取反、散列、证书的类型 / 签名 / 有效期 / 主体 / critical option 都按库的这一套，顺序与上面相同：吊销压过一切 → 单独记着的钥优先 →
+对上的 CA 签的合格证书放行（不记进已信任主机）→ 不合格拒绝 → CA 管的主机出示没担保的钥拒绝，不去问、不去记 ——
+宿主的「首次确认」「变更阻断」两个开关怎么设、是不是自动重连都一样。CA / 吊销记录读不出时 fail-closed；排主机密钥算法时读不出则忽略。
+有对上的 CA 时宿主同样报出证书类型，证书算法排到前面。
+
 **重协商**钉住的是首次交换时的整个 `K_S`（§8.4），证书换了也按主机密钥换了处理。
 所以重协商时的主机密钥算法清单只留下与钉住的钥**同类型、且同为证书（或同为普通钥）**的那些：
 钉住的是证书时，普通算法去掉后缀看起来也「支持」，谈成它的话服务端出示的是那把钥而不是证书，比对失败，连接被当成换了主机密钥断开。
