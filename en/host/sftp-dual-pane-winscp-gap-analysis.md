@@ -45,6 +45,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 
 > **Duplicate definitions**: `AppSettings.AutoResume` (:623) and `ResumeEnabled` (:668) overlap semantically; only the latter is consumed.
 > `TransferMaxRetries` (:671) and `AutoCleanTempFiles` (:674) have code comments admitting that they are "planned, with no runtime consumer".
+> (Later: `AutoCleanTempFiles` was wired on 2026-07-23 and `TransferMaxRetries` on 2026-10-24 — temporary failures such as a dropped connection or a timeout are retried with back-off, under File Transfer → Conflict handling → "Retry failed transfers".)
 
 ---
 
@@ -86,7 +87,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | Conflict handling, overwrite/skip/rename/ask | ✅ All four | Very good quality |
 | Resumable transfers | ✅ Implemented | Includes offset verification and a safe fallback window |
 | Rate limiting/concurrency | ✅ Implemented | See A10 |
-| **Transfer queue, visualizable, pausable, reorderable** | ❌ See A4 | WinSCP's queue is a core part of its experience |
+| **Transfer queue, visualizable, pausable, reorderable** | ⚠️ Partial (2026-10-24) | WinSCP's queue is a core part of its experience. Upload / download batches left unfinished by a disconnect or an exit are parked as "Paused" and restored after a restart, and "Resume" continues from the partial files (stored in SonnetDB `transfer_queue`, see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §9); manual pausing and reordering are still missing (see also A4) |
 | **Post-transfer verification, checksum** | ❌ None | |
 | Completion notification | ✅ Implemented | |
 

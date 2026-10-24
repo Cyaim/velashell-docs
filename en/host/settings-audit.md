@@ -46,7 +46,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | ID | Priority | Current settings | Merge conclusion | Recommended merged name | Data migration recommendation | Status |
 |---|---|---|---|---|---|---|
 | M-01 | P0 | `TerminalBehavior.BellMode` + `TerminalBehavior.VisualBell` | Must merge | Terminal bell behavior | When `VisualBell=true`, migrate to `BellMode=visual`, then delete the old field | ✅ Done: migration is implemented through `AppSettings.Normalize()`; the `VisualBell` field is retained as a read-only migration slot because deleting the field would silently discard old configuration, and it is no longer consumed at runtime |
-| M-02 | P1 | `Transfer.AutoResume` + `Transfer.ResumeEnabled` | ~~Both currently unimplemented~~ Resuming interrupted transfers is implemented (probe → verify starting point → 2MB safety fallback, consuming `ResumeEnabled`) | Resume interrupted transfers | `ResumeEnabled` is the sole switch; retain `AutoResume` as a read-only migration slot and do not consume it at runtime | ✅ Done (2026-07-23): the UI now returns as a single "Resume interrupted transfers" switch (File Transfer > Conflict handling); failed items support retry within the panel, and transfer history persists across restarts |
+| M-02 | P1 | `Transfer.AutoResume` + `Transfer.ResumeEnabled` | ~~Both currently unimplemented~~ Resuming interrupted transfers is implemented (probe → verify starting point → 2MB safety fallback, consuming `ResumeEnabled`) | Resume interrupted transfers | `ResumeEnabled` is the sole switch; retain `AutoResume` as a read-only migration slot and do not consume it at runtime | ✅ Done (2026-07-23): the UI now returns as a single "Resume interrupted transfers" switch (File Transfer > Conflict handling); failed items support retry within the panel. Since 2026-10-24, batches left unfinished by a disconnect or an exit go into the transfer queue, come back as "Paused" after a restart, and "Resume" continues them from the partial files (see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §9 and the eighteenth batch) |
 
 ## 4. Similar Names That Must Not Be Merged
 
@@ -58,7 +58,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | N-04 | Alert when disconnected | SSH connection state | No | Show a notification when the connection is disconnected | Notifications | ✅ Renamed |
 | N-05 | Show notification after transfer completes | File transfer completion | No | Show a notification when file transfer completes | File Transfer > Transfer Behavior | ✅ Renamed (description distinguishes it from the connection-disconnected notification) |
 | N-06 | Maximum retries | SSH automatic reconnect | No | Maximum automatic reconnect attempts | Connection > Automatic Reconnect | ✅ Renamed and moved to the subordinate automatic reconnect position (see C-02) |
-| N-07 | Maximum retry attempts | Retries after file transfer failure | No | Transfer failure retry attempts | File Transfer > Advanced; show after implementation | ✅ Hidden in the UI with R-09; return under the recommended name after implementation |
+| N-07 | Maximum retry attempts | Retries after file transfer failure | No | Transfer failure retry attempts (shown as "Retry failed transfers") | File Transfer > Conflict handling (after "Resume interrupted transfers") | ✅ Returned with R-09 (2026-10-24, eighteenth batch) |
 | N-08 | Log retention days | Terminal session logs | No | Terminal session log retention days | General > Data and Logs | ✅ Renamed (description distinguishes it from transfer logs) |
 | N-09 | Log retention days | File transfer logs | No | File transfer log retention days | File Transfer > Transfer Logs | ✅ Renamed (description distinguishes it from session logs) |
 
@@ -74,7 +74,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | R-06 | P1 | Load keys into Agent automatically | ~~Disabled, unimplemented~~ Implemented: after a successful private-key-file or certificate authentication, the key (together with the certificate for certificate authentication) is added to the local ssh-agent (like OpenSSH `AddKeysToAgent`) | Show again | `KeyOptions.AddKeysToAgent` now has a runtime consumer | ✅ Returned to the UI (2026-09-23, "SSH Agent" section of the Key Management page). The field was renamed from `AutoLoadToAgent` to `AddKeysToAgent` and is **off by default**: the old field defaulted to `true` but never had a consumer, so the `true` in existing configurations is not user consent. Since 2026-10-06 certificate authentication adds too ("certificate + private key"); when the OpenSSH agent service is not running it goes through the current user's Pageant (the SSH library's default endpoint, `ssh/spec/07-forwarding.md` §7.2) |
 | R-07 | P1 | Resume automatically | Disabled, duplicates interrupted transfer resume | Remove current UI | Return as a single setting after interrupted transfer resume is implemented | ✅ Returned as planned as the single "Resume interrupted transfers" setting (2026-07-23, see M-02) |
 | R-08 | P1 | Enable interrupted transfer resume | Disabled, duplicates automatic resume | Remove current UI | Return as a single setting after interrupted transfer resume is implemented | ✅ Returned as planned as the single "Resume interrupted transfers" setting (2026-07-23, see M-02) |
-| R-09 | P1 | Maximum transfer retry attempts | Disabled, unimplemented | Hide | The transfer retry pipeline is integrated | ✅ Hidden |
+| R-09 | P1 | Maximum transfer retry attempts | ~~Disabled, unimplemented~~ Implemented: temporary failures such as a dropped connection or a timeout are retried on the same session with back-off | Show again | The transfer retry pipeline is integrated | ✅ **Wired and shown again (2026-10-24, eighteenth batch)**: `TransferMaxRetries` is consumed by transfer failure retry (`TransferRetryPolicy`); the setting is File Transfer → Conflict handling → "Retry failed transfers", 0–10, default 3 |
 | R-10 | P1 | Clean up temporary files automatically | ~~Unimplemented~~ Implemented: delete partial destination files on failure/cancellation (delete the remote file for uploads and the local file for downloads); takes effect only when interrupted transfer resume is disabled | Clean up partial files | `AutoCleanTempFiles` already has runtime consumers | ✅ Returned to the UI (2026-07-23, shown as a subordinate setting of interrupted transfer resume) |
 | R-11 | P1 | Record all production sessions by default | Disabled, unimplemented | Hide | Session recording, storage, and privacy documentation are complete | ✅ Implemented and shown again (2026-07-12): recordings are stored in SonnetDB time-series storage, and the Security Audit page provides a toggle and a "Replay Center" entry (design NceE6); renamed "Record all sessions automatically" |
 | R-12 | P1 | Input redaction | Disabled, depends on session recording | Hide | Session recording and redaction mechanisms are complete | ✅ Disabled (no longer needed): recording captures only the terminal output stream, passwords are not echoed in the first place, and independent redaction is unnecessary; the field is retained |
@@ -175,7 +175,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | File Transfer | Transfer Behavior | Maximum concurrency, preserve timestamps (an SFTP upload sets the modification time on the same handle before closing, one round trip), flush uploads to disk (`Transfer.FsyncAfterUpload`, off by default: `fsync@openssh.com` before an SFTP upload is closed, skipped on servers without it, and a failed flush fails the upload), conflict handling, show hidden files, completion notification, delete remote folders with rm -rf (`Transfer.UseRecursiveDeleteCommand`, on by default) | The hidden-file state must be unified; the `rm -rf` entry must state three things: it applies **only to SSH sessions that have an exec channel** (standalone SFTP / FTP / plugin protocols always walk the tree over SFTP), it **falls back to the SFTP walk automatically** when the command is unavailable or exits non-zero, and **there is no per-entry progress** on that path (the bar goes indeterminate, and cancelling can only close the channel). The delete confirmation prompt is unchanged |
 | File Transfer | Bandwidth Limits | Master switch, upload limit, download limit | Hide both rate fields when disabled |
 | File Transfer | Transfer Logs | Record logs, retention days, storage path | Hide subordinate settings when logging is disabled |
-| File Transfer | Resume and Retry | Interrupted transfer resume, transfer retries, clean up temporary files | Show only after all are implemented |
+| File Transfer | Resume and Retry | Interrupted transfer resume, transfer retries, clean up temporary files | All three are implemented and shown, in the "Conflict handling" group: resume interrupted transfers (M-02), clean up partial files (only while resume is off, R-10), retry failed transfers (R-09, eighteenth batch) |
 | Security and Privacy | Host Identity Verification | Confirm fingerprint on first connection, block on fingerprint change | Explain first trust and change policies together |
 | Security and Privacy | Clipboard Permissions | OSC 52 write permission | Recommend Deny or Ask every time by default |
 | Security and Privacy | Credentials | Remember password, master password protection | If "Remember password" is placed on the connection page, provide only a link here and do not duplicate the control |
@@ -222,7 +222,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 - [x] Hide unimplemented update settings
 - [x] Hide master password and ssh-agent settings
 - [x] Delete duplicate resume-transfer UI
-- [x] Hide unimplemented transfer retry and cleanup settings
+- [x] Hide unimplemented transfer retry and cleanup settings (later: cleanup on 2026-07-23 and retry on 2026-10-24 were implemented and shown again, see R-10 / R-09)
 - [x] Hide unimplemented session recording and redaction settings (later, on 2026-07-12: recording was implemented and shown again, see R-11)
 - [x] Hide unsupported tab bar position (later, on 2026-10-24: shown again once the docking layer supported the bottom, see the fifteenth batch)
 
@@ -694,3 +694,33 @@ every root-level property belongs to exactly one category):
   files in the file panel, ticking "Don't ask again" for an external launch each leave an entry.
 - Storage and retention are unchanged: still `audit_log`, pruned at startup by "Audit log retention days" (ninth batch). The viewer gains a
   time-range filter and CSV export (read-only, not settings).
+
+### 2026-10-24 Eighteenth batch (retry failed transfers wired up)
+
+`TransferOptions.TransferMaxRetries` had been persisted with no consumer since R-09, and the settings page had dropped it. It was thought to
+depend on persisting the transfer queue — "a retry has to know what to retry"; on inspection that does not hold: an in-process retry needs
+nothing beyond the item being transferred, with nothing on disk, so it was wired up on its own. Interaction:
+[interaction-and-ui-specs.md](interaction-and-ui-specs.md) §9.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Retry failed transfers | 3 | 0–10 times (`Transfer.TransferMaxRetries`, 0 = never) | Under File Transfer → Conflict handling, after "Resume interrupted transfers" (and its subordinate "Clean up partial files"); out-of-range values in the settings file are clamped back by `Normalize` |
+
+- **Which failures are retried** (`Core/Sftp/TransferRetryPolicy`, judged by Core's neutral exception types, never by message text): temporary
+  failures — a dropped connection, a timeout, a closed channel, a lost FTP data connection — are retried on the same session; permission denied,
+  a missing path, a full disk, a server refusing the write, authentication / host-key failures, an unreadable local file and user cancellation
+  are not. Anything unrecognized is not retried — missing a temporary error at worst fails like before, while retrying a permanent one a few
+  rounds makes the user wait tens of seconds longer to see the real cause.
+- **Back-off**: 1 second, doubling, capped at 30 seconds; while waiting the row goes back to its waiting state with "Retry n/N" on the right,
+  and it keeps its transfer slot. The wait honours the batch's cancellation, so "Cancel all" still stops it.
+- **Where it continues**: with "Resume interrupted transfers" on and bytes actually moved in that attempt, the file continues from what it
+  had itself transferred (the starting point is verified as usual); if not a single byte moved it retries from the original start; with resume
+  off the whole file starts over. When the retries run out, the error reads "Still failing after N retries: …".
+- **Not retried**: same-session copies (a single server-side operation); and nothing is retried on the old session once the panel is torn
+  down (tab closed, session dropped) — in batches started from a file panel such failures turn into "Paused", and "Resume" continues them on a
+  new connection (the transfer queue, stored in the SonnetDB `transfer_queue` collection, restored as paused after a restart without
+  connecting; not a setting).
+- Single- and dual-pane file tabs take a settings snapshot when they open (existing behavior), so after changing this value open file tabs
+  must be reopened; the terminal sidebar's file panel refreshes on save.
+- Known gap: resumed downloads and dual-pane relays read the SSH library's raw stream, so the exception on a dropped connection there is not
+  translated, goes unrecognized and is not retried.
