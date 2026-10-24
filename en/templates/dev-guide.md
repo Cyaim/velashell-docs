@@ -280,7 +280,10 @@ context.Log.Info("hello");
 context.Log.Error("failed", ex);
 ```
 
-Writes to the host Trace pipeline, automatically adds the `[Plugin:<id>]` prefix, and is thread-safe.
+Writes to the host Trace pipeline, automatically adds the `[Plugin:<id>]` prefix, and is thread-safe. It also goes into this plugin's own
+log file `~/.velashell/logs/plugins/<id>.log` (rotated once at 1 MB), whose tail users can see under Plugin management → "View log". An
+isolated plugin's `Console.WriteLine` and the stack trace an unhandled exception writes to stderr land in that file too; `Trace.WriteLine`
+inside the plugin process is not collected, so anything users should see goes through `context.Log`.
 
 ### 5.2 Storage: Private Key-Value Storage
 
@@ -577,7 +580,7 @@ Test doubles: `CollectingLogger`, `InMemoryStorage`, `FakeSessions`, `FakeRemote
 | Disable one plugin | Place an empty `.disabled` file in the plugin directory |
 | Disable all plugins (troubleshooting) | Environment variable `VELASHELL_DISABLE_PLUGINS=1` |
 | Id conflict | First match wins according to root-directory order (application directory first); the later one is marked Invalid |
-| Logs | Debug output/Trace, with `[PluginManager]` and `[Plugin:<id>]` prefixes |
+| Logs | Debug output/Trace, with `[PluginManager]` and `[Plugin:<id>]` prefixes; each plugin also has its own `~/.velashell/logs/plugins/<id>.log` (`context.Log`, the isolated process's stdout / stderr, the activation / failure / crash entries the host records), whose tail is shown under Plugin management → "View log"; deleted on uninstall |
 
 ## 9. Performance and Behavior Discipline
 

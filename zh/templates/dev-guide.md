@@ -296,7 +296,10 @@ context.Log.Info("hello");
 context.Log.Error("failed", ex);
 ```
 
-落宿主 Trace 管道,自动带 `[Plugin:<id>]` 前缀,线程安全。
+落宿主 Trace 管道,自动带 `[Plugin:<id>]` 前缀,线程安全。同时落到这个插件自己的日志文件
+`~/.velashell/logs/plugins/<id>.log`(满 1 MB 轮转一份),用户在「插件管理 → 查看日志」里看得到尾部。
+隔离插件的 `Console.WriteLine` 与未处理异常写到 stderr 的堆栈也进这份文件;插件进程里的 `Trace.WriteLine` 不会被收集,
+要让用户看到的就走 `context.Log`。
 
 ### 5.2 Storage —— 私有键值存储
 
@@ -976,7 +979,7 @@ public async Task Refresh_ListsContainers()
 | 禁用单个插件 | 插件目录内放一个空的 `.disabled` 文件 |
 | 全局禁用(排障) | 环境变量 `VELASHELL_DISABLE_PLUGINS=1` |
 | 同 id 冲突 | 按根目录顺序先到先得(应用目录优先),后者标 Invalid |
-| 日志 | 调试输出/Trace,前缀 `[PluginManager]` 与 `[Plugin:<id>]` |
+| 日志 | 调试输出/Trace,前缀 `[PluginManager]` 与 `[Plugin:<id>]`;每个插件另有一份 `~/.velashell/logs/plugins/<id>.log`(`context.Log`、隔离进程的 stdout / stderr、宿主记的激活 / 失败 / 崩溃),在「插件管理 → 查看日志」里看尾部;卸载时删除 |
 
 ## 9. 性能与行为纪律
 

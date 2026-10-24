@@ -72,6 +72,7 @@ AI / Redis 面板另有 headless 装载与交互测试。
 | 能力域:terminal(读/搜/授权回写) | 07 | 缓冲快照读取+正则搜索;回写经授权闸(仅本次/本会话/始终/拒绝,始终持久 SonnetDB)+ 输入串行化队列 | PluginPermissionGateTests、HelloWorldTerminalTests |
 | 能力域:remoteFs 流式读取 | 07 | `OpenReadAsync` 顺序流;隔离模式 RPC 分块(openRead/streamRead/close,EOF 自动释放) | StreamingRoutingTests |
 | 插件管理页 | 02/06 | 侧栏插件图标 → 自绘卡片窗口(与资源监视同规格:min/max/close+缩放):列表/状态/启停/**卸载**/**从 .vpx 安装**/撤销终端授权;Changed 自动刷新 | PluginManagerEnableDisableTests、PluginInstallUninstallTests |
+| 插件管理页 日志查看(2026-10-24) | 02/06 | 每行「查看日志」:只读窗口显示该插件日志尾部(256 KB),可刷新、打开所在文件夹;日志按插件 id 落在 `~/.velashell/logs/plugins/<id>.log`,满 1 MB 轮转一份。来源全在宿主侧,不需要 SDK 新契约:`IPluginLogger`(进程内直调、隔离进程经 RPC 转回)、隔离进程的 stdout / stderr、宿主替插件记的激活 / 激活失败 / 崩溃;卸载时删除,不进诊断包 | PluginLogFilesTests(含真夹具插件 inProcess / isolated 两种模式)、PluginLogViewModelTests |
 | SDK 测试替身 | 09/13 | `TestPluginContext` + 全能力内存替身,插件无宿主可单测 | 被 HelloWorld 测试 dogfood |
 | 示例与开发内环 | 09 | HelloWorld(AXAML 面板/双语/各能力演示);F5 自动重建镜像插件。**仓库外插件(SDK 1.4)**:宿主自登记 `host.json` → `vela-plugin dev init` 生成 IDE 启动配置(`--dev-root` / `--wait-debugger` / `--data-root` 独立调试实例);开发期插件走影子副本装载 + 管理页"重新加载" + `--dev-watch` 自动重载 | HelloWorldDemoPanelTests、DevInnerLoopTests、HostRegistryTests、VelaShellStartupArgumentsTests |
 | 能力域:protocols(自带文件协议) | 07 | 声明 → 注册 → 惰性激活 → 注销;宿主的双栏浏览器/传输栈零改动复用;仅 `inProcess`。首个使用者:S3 插件 | PluginProtocolTests |
@@ -94,7 +95,6 @@ AI / Redis 面板另有 headless 装载与交互测试。
 | --- | --- | --- |
 | 权限系统 + Broker | 06 | **用户决策不做**(第一方/自装插件,信任即安装);若未来开放第三方生态需回访 |
 | 能力域:localFs / audio / net / ai | 07/11 | 未开口。建议 `vela.ai` 随 AI 插件动工时定接口(terminal、timeSeries、protocols、workspaces 域已完成) |
-| 插件管理页 日志查看 | 02/06 | 列表/启停/撤授权已做;查看每插件日志尾部待后续 |
 | SonnetDB 高阶模型开放 | — | 时序/全文/向量等暂不对插件开口,按真实需求再议(apiLevel 只增纪律) |
 | 第一方业务插件 | 15 | **已不属于本栏**:AI 助手(随主程序发布)、Redis / S3 / Telnet / 串口([velashell-plugins](https://github.com/VelaShellLabs/velashell-plugins))、Docker 管理面板([VelaShell.Plugin.DockerPanel](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.DockerPanel),`0.3.1`)均已落地 |
 
