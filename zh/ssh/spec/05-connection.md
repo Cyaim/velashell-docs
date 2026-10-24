@@ -103,7 +103,7 @@ stateDiagram-v2
 - **必须遵守对端宣告的值**：超了对端会断连。
 - 〔决策〕对端宣告的值**按本端上限截断**（本端报文长度上限减去报文头、通道头与最大填充）：照单全收的话，宣告 4 GiB 的对端
   会让 stdin 泵把管道里攒着的几 MiB 拼成一个报文。
-- 〔决策〕对端宣告 **0**：它不收任何数据。写进 stdin 的内容照实失败（写入方的冲刷拿到 `SshChannelException`，`ProtocolError`）；
+- 〔决策〕对端宣告 **0**：它不收任何数据。写进 stdin 的内容照实失败（写入方的冲刷拿到 `SshChannelException`，`ProtocolError`，`FailureKind` 为 `ZeroMaxPacket`）；
   什么都没写就完成 stdin 的，`EOF` 照样发。曾经算出的块是 0、被当成「通道关了」，泵悄悄退出 —— stdin 静默失效，连 `EOF` 也不再发。
 
 ### 2.3 应答
@@ -126,16 +126,19 @@ stateDiagram-v2
 | 4 | `string` | 描述（UTF-8） |
 | 5 | `string` | 语言标记 |
 
-| 原因码 | 含义 | 我们的映射 |
-| :-: | --- | --- |
-| 1 | `ADMINISTRATIVELY_PROHIBITED` | 常见于服务端禁了转发。**错误消息里要点明这一点** |
-| 2 | `CONNECT_FAILED` | 目标连不上（转发场景） |
-| 3 | `UNKNOWN_CHANNEL_TYPE` | |
-| 4 | `RESOURCE_SHORTAGE` | 服务端 `MaxSessions` 撞满 |
+| 原因码 | 含义 | 我们的映射 | `FailureKind` |
+| :-: | --- | --- | --- |
+| 1 | `ADMINISTRATIVELY_PROHIBITED` | 常见于服务端禁了转发。**错误消息里要点明这一点** | `ForwardingProhibited`（`direct-tcpip` / `direct-streamlocal@openssh.com`）；其它通道类型 `OpenProhibited` |
+| 2 | `CONNECT_FAILED` | 目标连不上（转发场景） | `ForwardTargetUnreachable` |
+| 3 | `UNKNOWN_CHANNEL_TYPE` | | `UnknownChannelType` |
+| 4 | `RESOURCE_SHORTAGE` | 服务端 `MaxSessions` 撞满 | `ResourceShortage` |
+| 其它 | | | `OpenRejected` |
 
 〔决策〕**原因码 1 与 4 要给出可操作的提示** ——
 「服务端禁止了端口转发（AllowTcpForwarding no）」和
 「服务端的并发会话数已满（MaxSessions）」比「通道打开失败」有用得多。
+提示写在 `Message` 里（给开发者的中文）；界面按 `SshChannelException.FailureKind`（`SshChannelFailureKind`）与 `ChannelType` 用自己的语言写，
+不解析句子（[08 §一](08-failures.md)）。对端还没确认、就先关掉了这条通道，是 `ClosedBeforeConfirmation`（§八的边界表）。
 
 ---
 
@@ -396,6 +399,10 @@ CLOSE 发出、账本关掉、在途的请求以「没成」结算，通道号�
 对端按顺序先回那个请求的应答、再回 CLOSE —— 那个应答是合法的在途报文（RFC 4254 §5.3），
 不能拿它判 FIFO 失步，否则同一连接上的终端、SFTP、隧道会一起断。
 同样地，账本关掉之后不再发 `want_reply = true` 的请求：发出去的话应答回来没人认领。
+
+请求被拒（`CHANNEL_FAILURE`）报 `SshChannelException`（`ChannelRequestRejected`），`FailureKind` 按请求分开：
+`pty-req` → `PtyRejected`、`shell` → `ShellRejected`、`exec` → `ExecRejected`、`subsystem` → `SubsystemRejected`（带 `SubsystemName`）——
+它们对应服务端各自的开关（`PermitTTY`、`ForceCommand`、`Subsystem`），界面据此说清是哪一样被拒了。
 
 ### 5.2 我们会发的请求
 
@@ -761,7 +768,7 @@ sequenceDiagram
 | `WINDOW_ADJUST` 导致窗口溢出 `uint32` | `ProtocolError`，断开 |
 | `CHANNEL_CLOSE` 之后收到该通道数据 | 丢弃，不报错（§1 规则 4） |
 | 对一条已经开着的通道收到 `CHANNEL_OPEN_FAILURE` | 忽略（对端违规）。〔决策〕不能把通道收尾、当场还号 —— 没走双向 `CLOSE`，对端还以为它开着，号被复用就会串话 |
-| 对一条还在等确认的通道收到 `CHANNEL_CLOSE` | 按「没开成」收尾：开通道的调用以 `ChannelOpenFailed` 失败；不回 `CLOSE`（对端的通道号还不知道）。曾经照常回 `CLOSE`（对端号还是 0）、等确认的调用方不带令牌就永远挂着 |
+| 对一条还在等确认的通道收到 `CHANNEL_CLOSE` | 按「没开成」收尾：开通道的调用以 `ChannelOpenFailed` 失败（`FailureKind` 为 `ClosedBeforeConfirmation`）；不回 `CLOSE`（对端的通道号还不知道）。曾经照常回 `CLOSE`（对端号还是 0）、等确认的调用方不带令牌就永远挂着 |
 | 通道请求应答队列空时收到 SUCCESS/FAILURE | `ProtocolError`，断开（FIFO 失步）；本端已收尾的通道除外，照单吸收（§5.1） |
 | 全局请求应答队列空时收到 SUCCESS/FAILURE | `ProtocolError`，断开（FIFO 失步） |
 | 收到未知编号的报文 | 回 `UNIMPLEMENTED`，**带被拒报文的序号**（RFC 4253 §11.4），不断开 |
@@ -772,8 +779,8 @@ sequenceDiagram
 | 对端灌不认识的通道请求 | 事件流里没读走的未知请求最多留 64 条，之后的丢掉（照样回 `FAILURE`）。退出状态、`EOF`、关闭不受这个上限影响 |
 | 对端重复发退出状态 / 退出信号 / `EOF` | 只收第一份，之后的丢掉 —— 它们每条通道只有一次（RFC 4254 §6.10），不受上面那个上限约束，重复的照收就是一条绕过窗口流控的内存放大。重复的 `EOF` 也不改状态 |
 | 对端开不认识的通道 | 回 `CHANNEL_OPEN_FAILURE`；描述文字截到 256 字符 —— 不把对端给的超长类型名原样回显 |
-| 会话窗口总预算超限 | 拒绝开新通道，抛 `SshChannelException`（`LimitExceeded` —— 本端的上限，不是对端拒绝的 `ChannelOpenFailed`），**不断开会话** |
-| 通道数超过 `MaxChannels`（〔决策〕默认 512） | 同上 |
+| 会话窗口总预算超限 | 拒绝开新通道，抛 `SshChannelException`（`LimitExceeded` —— 本端的上限，不是对端拒绝的 `ChannelOpenFailed`；`FailureKind` 为 `WindowBudgetExhausted`，上限在 `Limit`），**不断开会话** |
+| 通道数超过 `MaxChannels`（〔决策〕默认 512） | 同上（`FailureKind` 为 `ChannelLimitReached`，带 `Limit`） |
 
 〔决策〕**这些限额的非法值在设值时就抛 `ArgumentOutOfRangeException`**，不等连上了再出事：
 `MaxChannels` 至少为 1，`SessionWindowBudgetBytes`、`MaxQueuedReplyBytes` 与通道的 `ReceiveMaxPacketBytes` 必须为正，

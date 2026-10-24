@@ -724,7 +724,13 @@ ValueTask<SshHostKeyVerdict> EvaluateAsync(SshHostKeyContext context, Cancellati
    - `valid principals` 非空且含被连的主机名（逐字比较，不区分大小写，不做通配）；
    - 没有 critical option（主机证书没有定义任何一个，不认识的 critical option 必须拒绝）。
 
-   任何一条不满足 → `CertificateInvalid`，拒绝并说明是哪一条。〔决策〕**不退回到「没见过」去问、去记**：
+   任何一条不满足 → `CertificateInvalid`，拒绝并说明是哪一条。哪一条在 `KnownHostLookup.CertificateProblemDetail`（`HostCertificateProblem`）的
+   `Kind`（`HostCertificateProblemKind`）里，依次是 `NotHostCertificate`、`AuthorityKeyUnreadable` / `AuthorityKeyTooShort`、
+   `SignatureMalformed` / `SignatureAlgorithmRejected` / `SignatureInvalid`、`Expired` / `NotYetValid`、`NoPrincipals` / `HostNotListed` /
+   `UnknownCriticalOptions` —— 顺序即验证顺序，报的是第一条不过的；参数（Key ID、时刻、主体、主机、关键选项、算法、CA 位数）是原值，未清洗。
+   `KnownHostLookup.CertificateProblem` 是它的中文原文：其中来自对端证书的名字（Key ID、主体、关键选项、算法名）已经过清洗 ——
+   控制字符与双向文本控制符换成 `?`、超长截断（Key ID 与名字 256 字符、算法名 64 字符），正常证书的文本不变。
+   界面按 `Kind` 与参数用自己的语言写，不解析这句话。〔决策〕**不退回到「没见过」去问、去记**：
    这台主机已经配了 CA，证书不合格说明配置出了错或者路上有人，悄悄改走 TOFU 会把这件事藏起来，
    直到哪天那把钥不在记录里。
    〔决策〕**`valid principals` 为空的主机证书不认。**`PROTOCOL.certkeys` 把空列表定义为「对任何主体有效」；
@@ -741,7 +747,8 @@ ValueTask<SshHostKeyVerdict> EvaluateAsync(SshHostKeyContext context, Cancellati
 受信 CA 与吊销记录存在宿主自己的信任库里（SonnetDB `known_host_markers`），由用户在设置里导入 known_hosts 或粘贴整行
 `@cert-authority` / `@revoked` 得来。裁决时把这些记录与已信任主机换成库的 `KnownHostEntry` 交 `KnownHostsFile.Lookup`，
 取反、散列、证书的类型 / 签名 / 有效期 / 主体 / critical option 都按库的这一套，顺序与上面相同：吊销压过一切 → 单独记着的钥优先 →
-对上的 CA 签的合格证书放行（不记进已信任主机）→ 不合格拒绝 → CA 管的主机出示没担保的钥拒绝，不去问、不去记 ——
+对上的 CA 签的合格证书放行（不记进已信任主机）→ 不合格拒绝（拒绝理由按 `CertificateProblemDetail` 用界面语言写，带 Key ID）→
+CA 管的主机出示没担保的钥拒绝，不去问、不去记 ——
 宿主的「首次确认」「变更阻断」两个开关怎么设、是不是自动重连都一样。CA / 吊销记录读不出时 fail-closed；排主机密钥算法时读不出则忽略。
 有对上的 CA 时宿主同样报出证书类型，证书算法排到前面。
 

@@ -725,7 +725,15 @@ set to `Reject` / `AcceptAndPersist`, the callback would never be called — set
    - `valid principals` is non-empty and contains the host name being connected to (exact comparison, case-insensitive, no wildcards);
    - there are no critical options (none are defined for host certificates, and an unrecognized critical option must be rejected).
 
-   If any of these fails → `CertificateInvalid`: reject and say which one. 〔Decision〕**Do not fall back to "never seen" and ask or record**:
+   If any of these fails → `CertificateInvalid`: reject and say which one. Which one is in the `Kind` (`HostCertificateProblemKind`) of
+   `KnownHostLookup.CertificateProblemDetail` (`HostCertificateProblem`), in order: `NotHostCertificate`, `AuthorityKeyUnreadable` /
+   `AuthorityKeyTooShort`, `SignatureMalformed` / `SignatureAlgorithmRejected` / `SignatureInvalid`, `Expired` / `NotYetValid`,
+   `NoPrincipals` / `HostNotListed` / `UnknownCriticalOptions` — the order is the order of verification, and the first failing check is the
+   one reported; the parameters (Key ID, time, principals, host, critical options, algorithm, CA size) are raw values, not sanitized.
+   `KnownHostLookup.CertificateProblem` is its Chinese text: the names in it that come from the peer's certificate (Key ID, principals,
+   critical options, algorithm names) are already sanitized — control characters and bidirectional controls become `?`, and overlong values
+   are cut (256 characters for Key IDs and names, 64 for algorithm names); the text for a normal certificate is unchanged. A UI words it
+   from `Kind` and the parameters, without parsing the sentence. 〔Decision〕**Do not fall back to "never seen" and ask or record**:
    the host has a CA configured, so an invalid certificate means a misconfiguration or someone on the path; quietly switching to TOFU would hide that
    until the day the key is no longer on record.
    〔Decision〕**Host certificates with an empty `valid principals` are rejected.** `PROTOCOL.certkeys` defines an empty list as "valid for any principal";
@@ -744,7 +752,7 @@ importing a known_hosts file in Settings or pasting a whole `@cert-authority` / 
 trusted hosts into the library's `KnownHostEntry` and hands them to `KnownHostsFile.Lookup`, so negation, hashing and the certificate's type /
 signature / validity / principals / critical options all follow the library, in the same order as above: a revocation beats everything → a
 key recorded on its own comes first → a valid certificate signed by a matching CA is let through (not recorded among trusted hosts) → an
-invalid one is rejected → a CA-managed host presenting an unendorsed key is rejected, without asking or recording — whatever the host's
+invalid one is rejected (the reason is worded in the UI language from `CertificateProblemDetail`, with the Key ID) → a CA-managed host presenting an unendorsed key is rejected, without asking or recording — whatever the host's
 "confirm on first connection" and "block on change" switches say, and on automatic reconnects too. If the CA / revocation records cannot be
 read it fails closed; while ordering host key algorithms an unreadable store is ignored. With a matching CA the host likewise reports the
 certificate types, so certificate algorithms move to the front.

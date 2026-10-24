@@ -200,12 +200,37 @@ on failure in `SshAuthenticationException.Attempts`:
 | --- | --- |
 | `Method` | Method name |
 | `CredentialLabel` | Name the caller gave the credential (e.g. the private key path), **containing no key material** |
+| `BridgedCredentialLabel` | When a password credential is bridged onto keyboard-interactive, the label of that original credential; `CredentialLabel` is then that label plus "(via keyboard-interactive)". `null` otherwise |
 | `Outcome` | `Success` / `PartialSuccess` / `Failure` / `SkippedNotOffered` / `SkippedNoMaterial` |
 | `ServerOfferedAfter` | Method list the server offered after this step |
-| `Detail` | E.g. "private key file could not be read", "server does not accept this public key"; clues for a rejected certificate are in §4.5 |
+| `Detail` | The assembled Chinese description (for logs and the diagnostics panel), e.g. "private key file could not be read", "server does not accept this public key"; clues for a rejected certificate are in §4.5. The structured source is `Details` |
+| `Details` | A list of `SshAuthDetail`: each is a `Kind` (`SshAuthDetailKind`) plus parameters; kinds and parameters are in the table below |
 | `SignatureAlgorithm` | The signature algorithm this `publickey` step used (the retried one after a downgrade); `null` for other methods and for steps skipped before signing |
 
 Its reason to exist is concrete: **so that "this machine requires a one-time code" and "the password was mistyped" can be distinguished in the UI.**
+
+〔Decision〕**A UI builds its own wording from the kinds and parameters in `Details`, and never parses `Detail`.** `Detail` is assembled from
+`Details`: the first entry as written, the rest appended in full-width parentheses, with the certificate clues merged into one entry separated
+by "；". Parameters are raw values — text from the server or the certificate (the server's own words, Key IDs, principals, algorithm names) is
+not sanitized, and the caller sanitizes it before putting it on screen (the host runs it through `PeerText.Sanitize`, the same rule as
+`SftpException.ServerMessage`). The zero value `Unknown` means "not classified"; the library never produces it.
+
+| Kind (`SshAuthDetailKind`) | Parameters used |
+| --- | --- |
+| `ServerAccepts` | `Methods` |
+| `MethodNotOffered` | `Methods` |
+| `MethodFailureLimit` | `Method`, `Count` |
+| `PublicKeyNotAccepted` | — |
+| `PasswordChanged` / `PasswordChangeFailed` / `PasswordChangeNotConfigured` | — |
+| `NewPasswordRejected` | `Count`, `ServerText` |
+| `NewPasswordNotProvided` | — |
+| `CredentialFailed` | `Error` |
+| `NoUsableSignatureAlgorithm` | `KeyType` |
+| `Sha1Fallback` | `Algorithm`, `FallbackAlgorithm` |
+| `Sha1Signature` | `Algorithm` |
+| `CertificateExpired` / `CertificateNotYetValid` | `KeyId`, `Time` |
+| `HostCertificateForLogin` | `KeyId` |
+| `PrincipalNotListed` | `Principals`, `UserName` |
 
 〔Decision〕**`SkippedNoMaterial` records only problems with the credential itself**: exceptions thrown by the password callback,
 the keyboard-interactive response callback, or the signer (local private key, agent, external signer) — including
@@ -318,9 +343,10 @@ Rules:
 〔Decision〕**Downgrade is off by default** (`AllowSha1RsaSignatures = false`).
 Rationale: unconditional downgrade hands back the gains of Terrapin-style downgrade attacks.
 Those who need to connect to old servers turn it on explicitly — and the ones that need it most are exactly the old servers that send no `server-sig-algs`, which is why the retry in the table's third row is indispensable.
-When the retry happens, the attempt record (`SshAuthAttempt.Detail`) says "`rsa-sha2-512` was refused, downgraded to `ssh-rsa` (SHA-1) and retried".
+When the retry happens, the attempt record (`SshAuthAttempt.Detail`) says "`rsa-sha2-512` was refused, downgraded to `ssh-rsa` (SHA-1) and retried", structured as `Sha1Fallback` (§3.4).
 〔Decision〕**Every `publickey` step records the signature algorithm it used in `SshAuthAttempt.SignatureAlgorithm`**; when SHA-1 `ssh-rsa` is picked directly without a downgrade
-(it is the only usable one in `server-sig-algs`, or the only one the key can produce), `Detail` also says "SHA-1 signature used".
+(it is the only usable one in `server-sig-algs`, or the only one the key can produce), `Detail` also says "SHA-1 signature used" (`Sha1Signature`).
+When only the disabled SHA-1 `ssh-rsa` is left and no algorithm can be picked, the credential is skipped as "a problem with the material" (`SkippedNoMaterial`), recorded as `NoUsableSignatureAlgorithm`, and nothing is sent.
 〔History〕Early versions recorded it only for the downgrade retry; when SHA-1 was picked directly, the record did not show it.
 
 〔Note〕**Strip the certificate suffix before deciding "is this SHA-1"** (`SshPublicKey.StripCertificateSuffix`).
@@ -356,6 +382,7 @@ By default the private key signer passed in belongs to the combined signer and i
 local validation only produces false negatives when clocks are out of sync. 〔Decision〕**When a certificate is rejected, the facts visible locally go into `SshAuthAttempt.Detail`**
 — when authentication fails, they are the number-one clue: expired / not yet valid by the local clock (with the Key ID and the time, and the words "by the local clock"), a host certificate,
 the login user not among the principals (listing who the certificate was issued to; empty principals mean valid for every user and do not count). This is written only after a rejection; nothing is held back locally.
+In `Details` the four clues are `CertificateExpired` / `CertificateNotYetValid` / `HostCertificateForLogin` / `PrincipalNotListed` (§3.4).
 A certificate identity in the agent (whose signer can only hand out the blob) is decoded from the blob and checked the same way.
 〔History〕Early versions did not look at the certificate, and `Detail` said none of this; saying "your certificate has expired" in the UI meant the caller checking `IsTimeValid` itself.
 The validity period is still exposed to the caller through `OpenSshCertificate.ValidBeforeTime` / `IsTimeValid`.
@@ -555,7 +582,8 @@ Once the callback returns a new password, the library sends a change-password re
 The server's replies (RFC 4252 §8): success = changed, and signed in; `FAILURE` with partial = changed, more authentication needed;
 `FAILURE` without partial = **not changed** (password change unsupported, or the old password is wrong); another `PASSWD_CHANGEREQ` = the new password was not accepted (too simple, and so on),
 so the callback is asked again with `Attempt` incremented, **at most `PasswordCredential.MaxNewPasswordAttempts` (3) times**.
-No callback, the callback returning `null` (not changing it this time), not changed, or out of attempts are each recorded as one failure of that password credential, with `Detail` saying which;
+No callback, the callback returning `null` (not changing it this time), not changed, or out of attempts are each recorded as one failure of that password credential, with `Detail` saying which
+(in `Details`, respectively `PasswordChangeNotConfigured`, `NewPasswordNotProvided`, `PasswordChangeFailed` and `NewPasswordRejected`; a successful change is `PasswordChanged`);
 when the methods run out the reason is `PasswordExpired` (not the generic "methods exhausted"). A callback throwing `OperationCanceledException` is treated like the keyboard-interactive callback (`Aborted`).
 
 〔Decision〕**The protocol has no "type it again" step**: a mistyped new password becomes the account's password as is. So having the user enter it twice and comparing is the UI's job;
