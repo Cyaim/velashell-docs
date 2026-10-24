@@ -194,17 +194,20 @@ flowchart TD
 
 ### Port-forwarding tunnels
 
-Local `-L`, remote `-R` and dynamic SOCKS5 `-D`. **Both the data plane and the metering live in the SSH
-library (`src/VelaShell.Ssh`)**: the host's `Infrastructure/Ssh/LibraryPortForwardHandle.cs` is only a
-thin adapter that wires the connection counts, byte counts and error events of the library's forwarders
-(common base class `PortForwarder`) onto `IPortForwardHandle`. Before the library switch, Tmds.Ssh
-exposed no counters at all, so the host had to listen and relay by itself; that code has been deleted.
+Local `-L`, remote `-R`, dynamic SOCKS5 `-D` and remote dynamic SOCKS (`-R` with no target). **Both the data plane and the
+metering live in the SSH library (`src/VelaShell.Ssh`)**: the host's `Infrastructure/Ssh/LibraryPortForwardHandle.cs` is only a
+thin adapter that wires the connection counts, byte counts, the rate in each direction (`Throughput`), the connection snapshot
+(`Connections`) and the error events of the library's forwarders (common base class `PortForwarder`) onto `IPortForwardHandle`;
+requests carry `MaxBytesPerSecond` (the per-tunnel rate limit, passed into both kinds of library forward options). Before the
+library switch, Tmds.Ssh exposed no counters at all, so the host had to listen and relay by itself; that code has been deleted.
 
 | Direction | Implementation |
 | --- | --- |
 | Local `-L` | `LocalPortForwarder.Start`: the library listens locally and opens one `direct-tcpip` channel per connection |
 | Dynamic `-D` | `LocalPortForwarder.StartDynamic`: the SOCKS5 server in the library (RFC 1928, `CONNECT` with no auth only), with a handshake time limit |
 | Remote `-R` | `RemotePortForwarder.StartAsync`: `tcpip-forward` has the server listen, and the library connects the forwarded channels straight to the local target — no more relaying through a temporary local listener |
+| Remote dynamic `-R port` | `RemotePortForwarder.StartDynamicAsync` + `RemoteOpenPolicy`: a port on the server acts as a SOCKS5 proxy and this machine connects on the remote side's behalf; the host builds the allow list from `TunnelConfig.PermitRemoteOpen` (a lone `any` → `Any`), and anything outside it gets SOCKS `0x02` |
+| Unix sockets | In a local forward each side may be a socket: listening locally via `LocalPortForwardOptions.ListenSocketPath`, a target on the server via `LocalPortForwarder.StartToUnixSocket` (`direct-streamlocal@openssh.com`); a remote forward has only the both-sides-sockets form, `RemotePortForwarder.StartUnixSocketAsync`. The paths live in `TunnelConfig.LocalSocketPath` / `RemoteSocketPath` |
 
 > ⚠️ The relay preserves **half-close semantics**: when one side has been read to the end, EOF /
 > `Shutdown(Send)` is sent to the other side, instead of tearing the whole link down; when the link

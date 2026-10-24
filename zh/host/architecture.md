@@ -166,15 +166,18 @@ flowchart TD
 
 ### 端口转发隧道
 
-本地 `-L` / 远程 `-R` / 动态 SOCKS5 `-D`。**数据面与计量都在 SSH 库（`src/VelaShell.Ssh`）里** ——
+本地 `-L` / 远程 `-R` / 动态 SOCKS5 `-D` / 远程动态 SOCKS（`-R` 不给目标）。**数据面与计量都在 SSH 库（`src/VelaShell.Ssh`）里** ——
 宿主的 `Infrastructure/Ssh/LibraryPortForwardHandle.cs` 只是薄适配，把库的转发器（共同基类 `PortForwarder`）的
-连接数、字节数与错误事件接到 `IPortForwardHandle` 上。换库之前 Tmds.Ssh 不给任何计数，宿主只好自己监听、自己搬运，那一套已经删了。
+连接数、字节数、两个方向的速率（`Throughput`）、连接快照（`Connections`）与错误事件接到 `IPortForwardHandle` 上；
+请求带上 `MaxBytesPerSecond`（按隧道限速，交给库的两种转发参数）。换库之前 Tmds.Ssh 不给任何计数，宿主只好自己监听、自己搬运，那一套已经删了。
 
 | 方向 | 实现 |
 | --- | --- |
 | 本地 `-L` | `LocalPortForwarder.Start`：库在本机监听，每条连接开一个 `direct-tcpip` 通道 |
 | 动态 `-D` | `LocalPortForwarder.StartDynamic`：库里的 SOCKS5 服务端（RFC 1928，仅 `CONNECT` + 无认证），握手有时限 |
 | 远程 `-R` | `RemotePortForwarder.StartAsync`：`tcpip-forward` 让服务端监听，回连的通道由库直接接到本机目标 —— 不再经本机临时监听接力 |
+| 远程动态 `-R port` | `RemotePortForwarder.StartDynamicAsync` + `RemoteOpenPolicy`：服务端的端口当 SOCKS5 代理，本机替远端去连；放行名单由宿主从 `TunnelConfig.PermitRemoteOpen` 建（单独一条 `any` → `Any`），名单外的回 SOCKS `0x02` |
+| Unix 套接字 | 本地转发两头各自可以是套接字：本机监听 `LocalPortForwardOptions.ListenSocketPath`，服务器上的目标 `LocalPortForwarder.StartToUnixSocket`（`direct-streamlocal@openssh.com`）；远程转发只有两头都是套接字一种，`RemotePortForwarder.StartUnixSocketAsync`。路径在 `TunnelConfig.LocalSocketPath` / `RemoteSocketPath` |
 
 > ⚠️ 搬运保留**半关闭语义**：一侧读完就对另一侧发 EOF / `Shutdown(Send)`，而不是整条拆链；
 > 链路断了则两端都中止（本机 socket 发 RST），不把截断的数据当成完整的交出去。规格见 [`ssh/spec/07-forwarding.md`](../ssh/spec/07-forwarding.md) §2.2、§6。

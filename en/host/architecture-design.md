@@ -296,7 +296,7 @@ Owner: `VelaShell.Terminal` (rendering augmentation layer).
 | Status bar `gzmsb` | `StatusBarView` (App, already exists; the early `StatusMetricChip` control has been removed) | Connection/latency/size/encoding/lightweight metrics (§7) |
 | Command palette `FN5dM` | `CommandPalette` (already exists, to be registry-driven) | Ctrl+P/K (§8) |
 | File transfer `9Ralg` | `TransferToast` / `TransferRow` | Floating upper-right, draggable, auto-dismissed (§9/§4.7) |
-| Tunnel panel `fuXS7` | `TunnelPanel` / `TunnelRow` / `TunnelForm` | Local/remote/dynamic forwarding (§10) |
+| Tunnel panel `fuXS7` | `TunnelPanel` / `TunnelRow` / `TunnelForm` | Local / remote / dynamic / remote dynamic forwarding, Unix sockets, rates and the connection list, rate limits (§10) |
 | Resource monitor `EP3Gd` | `ResourceMonitorFlyout` | Opens after 400 ms hover, with boundary avoidance (§11/§4.7) |
 | Session context menu `e6klM` | `SessionContextMenu` | §12 |
 | New connection v2 (`KAuJb` and 7 more frames) | `ConnectionProfileView` (protocol rail + paged form) | §13.1 |

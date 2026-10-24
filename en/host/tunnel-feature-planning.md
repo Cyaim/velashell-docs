@@ -1,10 +1,10 @@
 # Tunnel Feature Planning (Plan)
 
-> Updated 2026-08-30. The original items 1 through 4 under "To Implement", plus the three follow-up iterations (automatic reconnect recovery / traffic statistics / port-conflict precheck), have all been delivered. Remaining ideas are listed at the end.
+> Updated 2026-10-24. The original items 1 through 4 under "To Implement", plus the three follow-up iterations (automatic reconnect recovery / traffic statistics / port-conflict precheck), have all been delivered. On 2026-10-24 four things the SSH library already had were wired up (live rates and current connections, per-tunnel rate limits, remote dynamic SOCKS with an allow list, Unix domain sockets), and the notice for a failed start-up auto-start gained "Retry". Remaining ideas are listed at the end.
 
 ## Implemented
 
-- Three types are available: local forwarding (`-L`), remote forwarding (`-R`), and **dynamic forwarding (`-D` / SOCKS5)**. Choose the type from a dropdown at creation time. Dynamic forwarding automatically hides the target-host/port inputs.
+- Four types are available: local forwarding (`-L`), remote forwarding (`-R`), **dynamic forwarding (`-D` / SOCKS5)** and **remote dynamic SOCKS (`-R` with no target, 2026-10-24)**. Choose the type from a dropdown at creation time. Dynamic forwarding automatically hides the target-host/port inputs.
 - Select the remote host from saved SSH sessions in the explorer. Enter the service port manually.
 - Inline tunnel actions: stop / start / delete. Deleting an active tunnel stops it automatically first.
 - The form's "Cancel" action clears and resets it. Creation errors are shown inline.
@@ -83,11 +83,79 @@ read nothing back.
   it, unit tests would depend on whether the machine running them happens to have a database listening
   on 5432.
 
+### Live rates and current connections (2026-10-24)
+
+- `IPortForwardHandle` exposes the rate in each direction and a snapshot of the connections, taken straight from the SSH library
+  forwarder's `Throughput` (the average over the last three whole seconds) and `Connections`; `TunnelService.RefreshStatistics` copies
+  them into `TunnelInfo` along with the counters, and stopping a tunnel zeroes the rates and empties the connection list (the cumulative
+  bytes stay).
+- A rate line sits under the statistics line: while running, `↑ 12.5 KB/s  ↓ 468.8 KB/s` (↑ sent into the tunnel from this machine, ↓
+  received back from it).
+- "› Open connections: N" is collapsed by default; expanded, it lists "source → target" and "open for … · ↑ bytes ↓ bytes" per
+  connection, at most 20, with "N more not shown" for the rest; clients that connected over a Unix socket have no name, so the source
+  reads "unknown source".
+- **Refreshed every second only while the panel is open** (`TunnelPanelViewModel.IsOpen` is set by the host as the panel shows and hides,
+  and the one-second traffic clock runs only then); liveness checks and automatic recovery stay on the 5-second tick.
+
+### Per-tunnel rate limits (2026-10-24)
+
+- `TunnelConfig.MaxBytesPerSecond` (null = unlimited); the form takes "Rate limit, KB/s per direction (0 = none)", 0–1048576 in
+  steps of 64, stored as bytes / second; values that do not divide evenly round up when editing, so a limit is never quietly widened to 0 =
+  unlimited.
+- Each direction is limited separately, and all connections on the tunnel share the allowance; with a limit set, the rate line ends with
+  "· Limit 512.0 KB/s", and only that half remains while the tunnel is stopped.
+- Creating, starting, rebuilding after an edit, automatic reconnect and start-up auto-start all carry it through the same
+  `CreateTunnelAsync` into both kinds of library forward options. The library fixes the allowance when the forwarder is built, so a change
+  takes effect when the tunnel is restarted — running tunnels cannot be edited anyway.
+
+### Remote dynamic SOCKS and the allow list (2026-10-24)
+
+- A new type, `TunnelType.RemoteDynamicForward` (appended at the end of the enum: the local store keeps the numeric value, so the first
+  three values stay put): a port on the server acts as a SOCKS5 proxy, through which remote programs have this machine connect to targets
+  for them. The listen address / port on the server reuse the remote forward's `RemoteHost` / `RemotePort`, and `LocalPort` is stored as 0.
+- The allow list `TunnelConfig.PermitRemoteOpen` is written like ssh_config's `PermitRemoteOpen` / the library's `RemoteOpenPolicy`:
+  `host:port`, with `*` `?` wildcards in the host, `*` allowed as the port, IPv6 in brackets, separated by whitespace or commas; a lone `any`
+  allows everything, and `any` mixed with other entries is an error. Names are compared as the remote side gives them, never resolved.
+- **No default, never empty**: this turns the local machine into a SOCKS proxy for the remote side, so what may go out must be stated by the
+  user. The form's "Create" stays disabled while it is empty and names a bad entry in red; the service layer (`Core/Tunnels/RemoteOpenRules`)
+  likewise refuses an empty list or bad rules from hand-edited or synced profiles, instead of treating them as allow-all or deny-all.
+- A request outside the list gets the SOCKS "not allowed by ruleset" reply from the library (`0x02`), and the tunnel row records a
+  localized note that the target the remote side asked for is not on the allow list and was refused.
+- In the form the local port field folds away, the host field is called "Listen address (on the server)", and the checkbox is "Listen only
+  on the server itself (127.0.0.1)" (ticked by default); the list row gains an "Allowed: …" line.
+
+### Unix domain socket forwarding (2026-10-24)
+
+- Following the combinations the library supports: in a **local forward** each side may be a socket (local TCP / local socket → server TCP /
+  server socket, all four work); a **remote forward** only "sockets on both sides"; dynamic and remote dynamic have no socket form.
+- No new type: `TunnelConfig` gains two optional fields, `LocalSocketPath` / `RemoteSocketPath` (null = use host and port), so the shape of
+  the existing types does not change. A remote forward with only one side given is not built rather than quietly falling back to a port.
+- The form: local / remote forwards gain a "Use Unix domain sockets" checkbox that shows two path fields (both required for a remote
+  forward); the side with a path greys out its port, host and "lock to 127.0.0.1". Local paths must be absolute and at most 107 bytes in
+  UTF-8 (103 on macOS); server paths must start with `/`.
+- Before listening locally the path is prechecked: if a file is already there the tunnel is not built and **the file is not deleted for the
+  user** (most likely a leftover from last time, but it may be another program's socket), matching the library's default
+  `AllowSocketReplacement = false`; stopping the tunnel deletes the socket file it created. Windows supports AF_UNIX from Windows 10 1803,
+  and the socket file inherits the directory's ACL.
+- The list row writes paths into the route, such as "This computer listens on 127.0.0.1:2375 → server-side target /var/run/docker.sock".
+
+### "Retry" on a failed start-up auto-start (2026-10-24)
+
+- **Could not connect to the server** → Retry reconnects that server and builds all of its auto-start tunnels that are not up yet; **one
+  tunnel failed** (for example, the port is taken) → only that one is retried; another failure is reported again, again with "Retry".
+- A retry is a user action: the host-key prompt may appear as usual, and a server whose automatic recovery was paused because
+  authentication needed a person authenticates again; if that tunnel was started, edited or deleted by the user in the meantime, Retry
+  does nothing.
+- A successful retry announces itself bottom right ("Tunnel “x” on srv is up."); notices from automatic reconnects (rebuilding after a
+  dropout) that failed on the host key / Tailscale authentication carry no Retry — what they need is the user starting the tunnel from the
+  panel and checking the prompt.
+
 ## Remaining ideas
 
-1. **Split traffic by direction**: `BytesTransferred` is currently a combined figure; showing the two
-   directions separately would make it quicker to tell uploads from downloads.
-2. **Rate**: only totals exist today, no instantaneous rate (KB/s); per-second sampling would give it.
+1. **Split cumulative traffic by direction**: the cumulative `BytesTransferred` is still a combined figure; rates are already split by
+   direction (see above).
+2. ~~**Rate**: only totals exist today, no instantaneous rate (KB/s); per-second sampling would give it.~~ — implemented on 2026-10-24,
+   see "Live rates and current connections".
 3. **SOCKS5 authentication for dynamic forwarding**: the server-side handshake accepts no-auth only
    (it listens on loopback, so any local process can use it). If binding to `0.0.0.0` is ever supported,
    username/password authentication should be required alongside it.
