@@ -56,7 +56,7 @@ vela-plugin verify bin/vpx/acme.snippets-0.1.0.vpx
 | [`pack`](#pack) | Pack an output directory into `.vpx` |
 | [`sign`](#sign) / [`verify`](#verify) | Sign / verify a package |
 | [`keygen`](#keygen) | Create a P-256 signing key pair |
-| [`info`](#info) / [`unpack`](#unpack) | Inspect a package header and manifest (or a marketplace listing) / extract (diagnostics) |
+| [`info`](#info--unpack) / [`unpack`](#info--unpack) | Inspect a package header and manifest (or a marketplace listing) / extract (diagnostics) |
 
 Conventions: exit code `0` on success, `1` on failure (readable errors go to stderr, prefixed
 `error:` / `warning:`). Relative paths are accepted and echoed back as absolute. Nothing needs

@@ -55,7 +55,7 @@ vela-plugin verify bin/vpx/acme.snippets-0.1.0.vpx
 | [`pack`](#pack) | 把产物目录打成 `.vpx` |
 | [`sign`](#sign) / [`verify`](#verify) | 给包签名 / 验签 |
 | [`keygen`](#keygen) | 生成 P-256 签名密钥对 |
-| [`info`](#info) / [`unpack`](#unpack) | 查看包头与清单(或商店条目)/ 解包(排障) |
+| [`info`](#info--unpack) / [`unpack`](#info--unpack) | 查看包头与清单(或商店条目)/ 解包(排障) |
 
 全局约定:
 
