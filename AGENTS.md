@@ -55,8 +55,8 @@ zh/            en/
   ssh/           ssh/         宿主的 SSH 库 VelaShell.Ssh 的架构、行为规格与上手
 ```
 
-`zh/` 与 `en/` **同构**,文件一一对应。`release-process.md` 目前只有中文版,
-`en/` 各区索引页里注明了这一点。
+`zh/` 与 `en/` **同构**,文件一一对应。中文文件名在 `en/` 里换成对应的英文短横线名
+(如 `会话导入.md` ↔ `session-import.md`),本来就是英文的文件名(如 `release-process.md`)两边相同。
 
 ### 改这里的规矩
 

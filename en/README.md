@@ -6,9 +6,9 @@
 | --- | --- |
 | [`host/`](host/) | Host (main app) architecture, design specs, performance logs and feasibility research |
 | [`plugins/`](plugins/) | Plugin system design blueprint 01–15 and the [status overview](plugins/STATUS.md) |
-| [`sdk/`](sdk/) | Plugin contract SDK reference |
-| [`cli/`](cli/) | `vela-plugin` command-line manual |
-| [`templates/`](templates/) | Plugin dev guide, packaging and publishing |
+| [`sdk/`](sdk/) | Plugin contract SDK reference and release process |
+| [`cli/`](cli/) | `vela-plugin` command-line manual and release process |
+| [`templates/`](templates/) | Plugin dev guide, packaging and publishing, templates-package release process |
 | [`ssh/`](ssh/) | VelaShell.Ssh, the host's SSH library: architecture and rationale, behavioural specs 00–09, getting started |
 | [`xserver/`](xserver/) | VelaShell.XServer, an embeddable X11 server library: architecture, clean-room rules, milestones, decision log, troubleshooting over SSH forwarding |
 
@@ -21,7 +21,3 @@
 
 The [plugin blueprint](plugins/) describes the **host-side** design and implementation. Read it to
 understand why plugins look the way they do; you do not need it to write one.
-
-> Release-process documents (`release-process.md`) exist in Chinese only, under
-> [`../zh/sdk/`](../zh/sdk/release-process.md), [`../zh/cli/`](../zh/cli/release-process.md) and
-> [`../zh/templates/`](../zh/templates/release-process.md).

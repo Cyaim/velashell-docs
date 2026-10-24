@@ -5,10 +5,10 @@
 | Document | Contents |
 | --- | --- |
 | [sdk-reference.md](sdk-reference.md) | **SDK reference**: package layout, entry contract, capability domains, SDK version history, test doubles, load model |
+| [release-process.md](release-process.md) | **How `velashell-plugin-sdk` is released**: the Release flow, NuGet Trusted Publishing setup, apiLevel and Avalonia version discipline |
 
 Repository: [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk)
-(`VelaShell.PluginSdk`, `VelaShell.PluginSdk.Testing`). Its release process is documented in
-Chinese only: [`../../zh/sdk/release-process.md`](../../zh/sdk/release-process.md).
+(`VelaShell.PluginSdk`, `VelaShell.PluginSdk.Testing`).
 
 ## Related
 

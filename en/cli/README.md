@@ -5,10 +5,10 @@
 | Document | Contents |
 | --- | --- |
 | [cli.md](cli.md) | **`vela-plugin` manual**: install / update / list from the marketplace, the dev inner loop (`dev init`), `doctor`, validate / pack / sign, host launch arguments |
+| [release-process.md](release-process.md) | **How `velashell-plugin-cli` is released**: the Release flow, NuGet Trusted Publishing setup, the two cross-repository knobs |
 
 Repository: [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli)
-(`VelaShell.Plugin.Cli`, `VelaShell.PluginSdk.Build`). Its release process is documented in
-Chinese only: [`../../zh/cli/release-process.md`](../../zh/cli/release-process.md).
+(`VelaShell.Plugin.Cli`, `VelaShell.PluginSdk.Build`).
 
 ## Related
 
