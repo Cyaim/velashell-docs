@@ -64,15 +64,15 @@ public interface IRemoteFs
 
 进度采用 64 位字节计数、单调快照序号、执行代次和明确终态。已写满仍可能正在远端收尾；只有 `Succeeded` 是成功。远端临时文件是目标同目录下的 `.vela-up-<16 位十六进制>`；开始写之前先做提交预检，要覆盖而服务端没有 `posix-rename`、不覆盖而目标已存在时直接失败（`ErrorCode` 分别为 `not-supported` / `commit-rejected`），不传完一整份才被拒，提交仍是唯一权威。覆盖提交把被替换普通文件的权限位带到新文件上，属主尽力而为，setuid / setgid 只在属主属组对上之后才带；带不过去又会放宽权限时拒绝提交、目标不动。取消必须指定执行代次，恢复必须重新审批、核对连接身份/源对象/检查点及最终提交结果；不能自动重传不确定副作用。新方法默认明确不支持，能力位 false 时不退回同步大文件上传。这里的契约不等于通用权限 Broker 已实现，实际可用权限与生命周期边界必须按宿主实现说明解读。
 
-### 2.2 独立下载任务（SDK TBD，未发布）
+### 2.2 独立下载任务（SDK 2.1.2）
 
-`SupportsDownloadOperations`（默认 false）与 `StartDownloadAsync(sessionId, remotePath, localPath, RemoteDownloadOptions, ct)` 为独立下载入口；不支持则拒绝，不降级同步下载。复用 §2.1 的 get/wait/cancel 与原共享资源额度：上传下载合计每插件 4 实际传输、32 活动/排队、1024 生命周期回执；请求/等待取消不取消任务，`Timeout=null` 无默认执行死线，下载 `CanResume=false`。方向/阶段、64 位进度和停止确认见 [SDK §3.3c](../sdk/sdk-reference.md#33c-独立下载任务sdk-tbd未发布)。
+`SupportsDownloadOperations`（默认 false）与 `StartDownloadAsync(sessionId, remotePath, localPath, RemoteDownloadOptions, ct)` 为独立下载入口；不支持则拒绝，不降级同步下载。复用 §2.1 的 get/wait/cancel 与原共享资源额度：上传下载合计每插件 4 实际传输、32 活动/排队、1024 生命周期回执；请求/等待取消不取消任务，`Timeout=null` 无默认执行死线，下载 `CanResume=false`。方向/阶段、64 位进度和停止确认见 [SDK §3.3c](../sdk/sdk-reference.md#33c-独立下载任务sdk-212)。
 
 新下载使用**独立于上传的单任务宿主租约**，覆盖远端读和本地写：逐次确认插件、真实会话、源、最终目标及 `Overwrite=false` 默认策略，显式覆盖需明确批准。保存选择器和 AI Bypass 都不能跳过，缺授权闸/提示器/窗口则拒绝。撤权取消待批准及活动下载，提交前重验，隐藏后续元数据，清理取消不被阻挡；不保证已提交文件回滚。此强制点不扩展旧同步 API，也不是通用文件 Broker。
 
 当前宿主在 Windows 固定本地 NTFS 与 Linux / macOS（x64、arm64）的本地文件系统上实现安全提交：审批前钉住目标目录链，独占随机临时文件，并相对钉住的父目录原子提交。Windows 逐段以遍历 + 读属性权限持有祖先目录句柄，共享读写、不共享删除，祖先改不了名、挪不走；只拒名字代理类重解析点，云文件占位符不算链接；临时文件按句柄核验建在钉住的父目录里，提交经 `NtSetInformationFile` 相对父目录句柄改名。Linux / macOS 从 `/` 起逐级 `openat(O_NOFOLLOW)`、只留父目录 fd，链上有符号链接即拒绝，9p、SMB、FUSE、NFS 等非本地文件系统在审批前拒绝；无替换走 `renameat2(RENAME_NOREPLACE)` / `renameatx_np(RENAME_EXCL)`，标志不被支持时退到 `linkat`。默认原子无替换，即使目标中途出现也不覆盖；获准覆盖不先删目标，POSIX 上新文件沿用旧文件的权限位。UNC、其它文件系统/后端明确拒绝（`not-supported`），不直接写最终路径。复用用户下载限速并保留时间戳；长度/前后元数据/可用摘要只能检测部分源变化，不能保证远端原子快照。满字节仍须校验、关闭、提交；不合作后端停止未确认时保留槽/句柄并报告 Unknown/TimedOut，不自动重下。
 
-下载 SDK 源码已就位，正式版本仍 TBD（发版时替换）；宿主/AI接线受正式包缺新类型阻塞，尚不构成下游构建或真实链路通过。正式发布后才升级中央包、AI显式依赖与 minSdk。模型及链接双入口见 [自动化与 AI §1.7](11-automation-and-ai.md#17-ai-双入口后台下载sdk-tbd未发布)。
+下载契约已随 SDK 2.1.2 正式发布，宿主中央包、AI 显式依赖与 minSdk 均已升到 2.1.2；提交用例在 Windows 与 Linux 上实际跑过，macOS 只经 CI，真实 SSH / GUI 整链尚未验收。模型及链接双入口见 [自动化与 AI §1.7](11-automation-and-ai.md#17-ai-双入口后台下载sdk-212)。
 
 ## 3. vela.remoteExec — 远程执行(S5/S6)
 
@@ -86,7 +86,7 @@ public interface IRemoteFs
 
 普通与 sudo 流共享每插件 4 条流上限，接收器应同步快速转发，不用 `Progress<T>` 打乱输出顺序。接收器慢了不会中断执行，只会让远端输出跟着慢下来：隔离插件的通知队列满时宿主等它腾出位置，背压经 SSH 窗口传回远端；进程内插件本就在读行线程上同步回调。普通流无换行长输出按最多 4096 字符分片，CR 可分段，超长行带 `[VelaShell: continued]`，因此不要依赖一条回调等于一条完整应用记录。sudo 输出与普通流一样把非 UTF-8 字节替换为 U+FFFD，GBK 日志、二进制内容或非 UTF-8 文件名不会让在跑的 root 命令变成 Unknown。
 
-**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传/下载 API 提供各自专用单任务租约（§2.1/§2.2；下载SDK未发布），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
+**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传/下载 API 提供各自专用单任务租约（§2.1/§2.2），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
 
 AI 插件的提权审批与宿主确认是两层：`Ask` / `ReadOnlyAuto` 使用独立 `run_command_elevated` 类型、展示目标及整条 root 范围且不设 RepeatKey；缺少审批 Handler 即拒绝，root `cat` 也不能按只读自动放行。用户明确选择 `Bypass` 只跳过插件审批，绝不跳过宿主确认。MCP 无 Handler 时前两模式拒绝，Bypass 可以请求桌面宿主确认。
 

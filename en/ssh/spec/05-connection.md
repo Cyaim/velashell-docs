@@ -105,7 +105,7 @@ For server-initiated channel types see [`07-forwarding.md`](07-forwarding.md).
 - **The value announced by the peer must be respected**: exceeding it makes the peer disconnect.
 - 〔Decision〕The value the peer announces is **clamped to our own limit** (our packet length limit minus the packet header, the channel header and the maximum padding): taken at face value, a peer announcing 4 GiB
   would make the stdin pump pack the several MiB queued in the pipe into one packet.
-- 〔Decision〕The peer announces **0**: it accepts no data at all. Whatever is written to stdin fails visibly (the writer's flush gets an `SshChannelException`, `ProtocolError`);
+- 〔Decision〕The peer announces **0**: it accepts no data at all. Whatever is written to stdin fails visibly (the writer's flush gets an `SshChannelException`, `ProtocolError`, with `FailureKind` `ZeroMaxPacket`);
   completing stdin without writing anything still sends `EOF`. The chunk used to be computed as 0 and taken for "the channel is closed", and the pump quietly exited — stdin silently stopped working, and not even `EOF` was sent any more.
 
 ### 2.3 Replies
@@ -128,16 +128,20 @@ For server-initiated channel types see [`07-forwarding.md`](07-forwarding.md).
 | 4 | `string` | Description (UTF-8) |
 | 5 | `string` | Language tag |
 
-| Reason code | Meaning | Our mapping |
-| :-: | --- | --- |
-| 1 | `ADMINISTRATIVELY_PROHIBITED` | Common when the server has disabled forwarding. **The error message must point this out** |
-| 2 | `CONNECT_FAILED` | Target unreachable (forwarding scenario) |
-| 3 | `UNKNOWN_CHANNEL_TYPE` | |
-| 4 | `RESOURCE_SHORTAGE` | Server's `MaxSessions` reached |
+| Reason code | Meaning | Our mapping | `FailureKind` |
+| :-: | --- | --- | --- |
+| 1 | `ADMINISTRATIVELY_PROHIBITED` | Common when the server has disabled forwarding. **The error message must point this out** | `ForwardingProhibited` (`direct-tcpip` / `direct-streamlocal@openssh.com`); other channel types `OpenProhibited` |
+| 2 | `CONNECT_FAILED` | Target unreachable (forwarding scenario) | `ForwardTargetUnreachable` |
+| 3 | `UNKNOWN_CHANNEL_TYPE` | | `UnknownChannelType` |
+| 4 | `RESOURCE_SHORTAGE` | Server's `MaxSessions` reached | `ResourceShortage` |
+| other | | | `OpenRejected` |
 
 〔Decision〕**Reason codes 1 and 4 must come with actionable hints** —
 "The server prohibits port forwarding (AllowTcpForwarding no)" and
 "The server's concurrent session limit is reached (MaxSessions)" are far more useful than "Failed to open channel".
+The hint lives in `Message` (Chinese, for developers); a UI writes its own wording from `SshChannelException.FailureKind`
+(`SshChannelFailureKind`) and `ChannelType` instead of parsing the sentence ([08 §1](08-failures.md)). A peer closing the channel before
+confirming it is `ClosedBeforeConfirmation` (the edge-case table in §8).
 
 ---
 
@@ -401,6 +405,10 @@ CLOSE is sent, the ledger is closed, requests in flight are settled as "did not 
 The peer replies to that request first and only then sends CLOSE — that reply is a legitimate in-flight message (RFC 4254 §5.3)
 and must not be taken as the FIFO falling out of sync; otherwise the terminal, SFTP and tunnels on the same connection would all go down with it.
 Likewise, once the ledger is closed no further `want_reply = true` request is sent: its reply would come back with nobody to claim it.
+
+A refused request (`CHANNEL_FAILURE`) is reported as `SshChannelException` (`ChannelRequestRejected`) with a `FailureKind` per request:
+`pty-req` → `PtyRejected`, `shell` → `ShellRejected`, `exec` → `ExecRejected`, `subsystem` → `SubsystemRejected` (with `SubsystemName`) —
+they map to separate server switches (`PermitTTY`, `ForceCommand`, `Subsystem`), so a UI can say which one was refused.
 
 ### 5.2 Requests we send
 
@@ -766,7 +774,7 @@ With `SshShellOptions.ObscureKeystrokeTiming` (the tick; OpenSSH defaults to 20 
 | `WINDOW_ADJUST` causes the window to overflow `uint32` | `ProtocolError`, disconnect |
 | Data for a channel received after its `CHANNEL_CLOSE` | Discard, no error (§1 rule 4) |
 | `CHANNEL_OPEN_FAILURE` received for a channel that is already open | Ignore (a peer violation). 〔Decision〕Do not wind the channel down and release its number on the spot — without the two-way `CLOSE` the peer still thinks it is open, and reusing the number would cross the streams |
-| `CHANNEL_CLOSE` received for a channel still waiting for confirmation | Wind it down as "not opened": the open call fails with `ChannelOpenFailed`; no `CLOSE` is sent back (the peer's channel number is not known yet). It used to send `CLOSE` back as usual (with a peer number still 0), and a caller waiting for confirmation without a token hung forever |
+| `CHANNEL_CLOSE` received for a channel still waiting for confirmation | Wind it down as "not opened": the open call fails with `ChannelOpenFailed` (`FailureKind` is `ClosedBeforeConfirmation`); no `CLOSE` is sent back (the peer's channel number is not known yet). It used to send `CLOSE` back as usual (with a peer number still 0), and a caller waiting for confirmation without a token hung forever |
 | SUCCESS/FAILURE received while the channel request reply queue is empty | `ProtocolError`, disconnect (FIFO out of sync); except on a channel this side has already wound down, where it is absorbed (§5.1) |
 | SUCCESS/FAILURE received while the global request reply queue is empty | `ProtocolError`, disconnect (FIFO out of sync) |
 | Message with an unknown number received | Reply `UNIMPLEMENTED`, **carrying the sequence number of the rejected message** (RFC 4253 §11.4); do not disconnect |
@@ -777,8 +785,8 @@ With `SshShellOptions.ObscureKeystrokeTiming` (the tick; OpenSSH defaults to 20 
 | The peer floods channel requests we don't recognize | At most 64 unread unknown requests stay in the event stream; later ones are dropped (still answered with `FAILURE`). Exit status, `EOF` and close are not subject to this limit |
 | The peer repeats exit status / exit signal / `EOF` | Only the first is taken, later ones are dropped — each happens once per channel (RFC 4254 §6.10) and is not subject to the limit above, so accepting repeats would be memory amplification that bypasses window flow control. A repeated `EOF` does not change the state either |
 | The peer opens a channel type we don't recognize | Reply `CHANNEL_OPEN_FAILURE`; the description is truncated to 256 characters — an overlong type name from the peer is not echoed back verbatim |
-| Session window total budget exceeded | Refuse to open new channels, throw `SshChannelException` (`LimitExceeded` — a limit on this side, not the peer-refused `ChannelOpenFailed`), **do not disconnect the session** |
-| Channel count exceeds `MaxChannels` (〔Decision〕default 512) | Same as above |
+| Session window total budget exceeded | Refuse to open new channels, throw `SshChannelException` (`LimitExceeded` — a limit on this side, not the peer-refused `ChannelOpenFailed`; `FailureKind` is `WindowBudgetExhausted`, with the limit in `Limit`), **do not disconnect the session** |
+| Channel count exceeds `MaxChannels` (〔Decision〕default 512) | Same as above (`FailureKind` is `ChannelLimitReached`, with `Limit`) |
 
 〔Decision〕**Invalid values for these limits throw `ArgumentOutOfRangeException` when they are set**, instead of causing trouble after the connection is up:
 `MaxChannels` must be at least 1; `SessionWindowBudgetBytes`, `MaxQueuedReplyBytes` and the channel's `ReceiveMaxPacketBytes` must be positive;

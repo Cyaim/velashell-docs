@@ -19,17 +19,21 @@
 | 属性(`Directory.Build.props`) | 含义 | 落点 |
 | --- | --- | --- |
 | `VelaTemplatesVersion` | **模板包自己的版本**,就是 Release 标签里那个 | 1 处:`Directory.Build.props` |
-| `VelaBuildPackageVersion` | 生成的工程要引用哪一版 `VelaShell.PluginSdk.Build` | 5 处,见下 |
+| `VelaBuildPackageVersion` | 生成的工程要引用哪一版 `VelaShell.PluginSdk.Build` | 7 处,见下 |
 
-`VelaBuildPackageVersion` 的五处落点:
+`VelaBuildPackageVersion` 的七处落点:
 
 | 落点 | 漏改的后果 |
 | --- | --- |
 | `Directory.Build.props` | 核对基准不对,下面几处的漏改就查不出来了 |
 | `content/velaplugin/.template.config/template.json` | 新建的工程去还原一个旧版包 —— 构建期由 `VELA1004` 拦下 |
 | `content/velaplugin-ui/.template.config/template.json` | 同上 |
-| `docs/dev-guide.md` 的 `PackageReference` 片段 | **不报错**,但文档是给人照抄的,过期版本号会被原样粘进别人的工程 |
-| `docs-en/dev-guide.md` 的同一片段 | 同上 |
+| `content/velaplugin-protocol/.template.config/template.json` | 同上 |
+| `content/velaplugin-workspace/.template.config/template.json` | 同上 |
+| velashell-docs 的 `zh/templates/dev-guide.md` 里的 `PackageReference` 片段 | **不报错**,但文档是给人照抄的,过期版本号会被原样粘进别人的工程 |
+| velashell-docs 的 `en/templates/dev-guide.md` 的同一片段 | 同上 |
+
+最后两处在另一个仓库,是**可选**落点:脚本按 `-DocsRoot` / `$env:VELASHELL_DOCS` / 同级 `../velashell-docs` 找到它才改,找不到就跳过。
 
 一条命令全改:
 
@@ -140,9 +144,10 @@ pwsh scripts/Set-Version.ps1 1.5.1        # 再发一版模板把它带出去
 
 ## 六、端到端冒烟
 
-发布前会跑 `scripts/Invoke-Smoke.ps1`:装上刚打出的模板包,对**两个模板**各走一遍
+发布前会跑 `scripts/Invoke-Smoke.ps1`:装上刚打出的模板包,对**四个模板**各走一遍
 `dotnet new` → 还原 → `dotnet build -t:PackVpx` → 读回容器 → 查共享程序集有没有漏进
-插件输出目录。
+插件输出目录;`velaplugin-protocol` / `velaplugin-workspace` 还会跑生成出来的测试工程(`dotnet test`),
+并复查插件输出目录里只有插件自己的程序集。新增模板时要同时改 `Invoke-Smoke.ps1` 的模板循环与 `Set-Version.ps1` 的落点清单。
 
 **这一步不是形式。** 模板包是纯内容包,`dotnet pack` 成功几乎什么都不能说明 ——
 真正会出问题的地方全在包装好之后:

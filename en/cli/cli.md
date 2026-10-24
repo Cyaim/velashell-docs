@@ -56,7 +56,7 @@ vela-plugin verify bin/vpx/acme.snippets-0.1.0.vpx
 | [`pack`](#pack) | Pack an output directory into `.vpx` |
 | [`sign`](#sign) / [`verify`](#verify) | Sign / verify a package |
 | [`keygen`](#keygen) | Create a P-256 signing key pair |
-| [`info`](#info) / [`unpack`](#unpack) | Inspect a package header and manifest (or a marketplace listing) / extract (diagnostics) |
+| [`info`](#info--unpack) / [`unpack`](#info--unpack) | Inspect a package header and manifest (or a marketplace listing) / extract (diagnostics) |
 
 Conventions: exit code `0` on success, `1` on failure (readable errors go to stderr, prefixed
 `error:` / `warning:`). Relative paths are accepted and echoed back as absolute. Nothing needs
@@ -100,6 +100,17 @@ post-install tamper detection" buys you.
 > directory came out of that package". Installing over it from the command line only looks like
 > changed files to the host, and the plugin is marked Invalid. Uninstall it in the manager first if
 > you want to switch to the CLI.
+
+> **Side-loaded plugins cannot pin a publisher.** For a plugin installed through the manager, the receipt
+> also pins the signer's public key: when a later package with the same id comes from a different signer
+> (or is not signed at all), the manager shows both fingerprints side by side and replaces the plugin only
+> with the user's approval. A plugin installed from the command line has no such receipt — the baseline the
+> host records holds no public key, so that check stays silent for it — and `install` / `update` do not
+> compare against the old fingerprint recorded in `.vela-install.json` either: a package from a different
+> signer is installed all the same, with the new fingerprint printed. So **when an impersonating package
+> with the same id is installed over it, the host has no way to stop it**; after a restart it just records
+> a new baseline. If that matters, pass `--trust <fingerprint>` every time (see `install` below) so a package
+> with a mismatching fingerprint, or none, is refused — or install through the manager instead.
 
 ### `install`
 

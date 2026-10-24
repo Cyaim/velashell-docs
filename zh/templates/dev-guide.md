@@ -31,9 +31,9 @@
 | --- | --- |
 | [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) `src/VelaShell.PluginSdk/` | 契约:入口接口、能力接口、DTO、manifest 模型 |
 | [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) `src/VelaShell.PluginSdk.Testing/` | 测试替身:`TestPluginContext` 与各能力内存实现 |
-| [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli) `src/VelaShell.PluginSdk.Build/` | 插件工程引用的那一个 NuGet 包:MSBuild props/targets + 随包分发的打包器 |
+| [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) `src/VelaShell.PluginSdk.Build/` | 插件工程引用的那一个 NuGet 包:MSBuild props/targets + 随包分发的打包器(`VelaShell.PluginSdk.Packer`,同仓;2026-09-11 起从 velashell-plugin-cli 搬来) |
 | [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli) `src/VelaShell.Plugin.Cli/` | `vela-plugin` 命令行工具(校验/打包/签名/开发挂载) |
-| **本仓库** `src/VelaShell.Plugin.Templates/` | `dotnet new` 模板(`velaplugin` / `velaplugin-ui`) |
+| **本仓库** `src/VelaShell.Plugin.Templates/` | `dotnet new` 模板(`velaplugin` / `velaplugin-ui` / `velaplugin-protocol` / `velaplugin-workspace`) |
 
 宿主侧的实现在**主仓库** [joesdu/VelaShell](https://github.com/joesdu/VelaShell):
 `src/VelaShell.Infrastructure/Plugins/`(发现/装载/激活/停用、能力桥接)、
@@ -77,9 +77,11 @@ dotnet tool install -g VelaShell.Plugin.Cli      # 可选,见下
 
 # 建工程(id = acme.snippets)
 dotnet new velaplugin -n Snippets --publisher acme --authorName "Your Name"
-#   velaplugin      基础:入口类 + 一条命令
-#   velaplugin-ui   带一个 Avalonia 面板(AXAML)
-#   --hostMode inProcess|isolated
+#   velaplugin            基础:入口类 + 一条命令
+#   velaplugin-ui         带一个 Avalonia 面板(AXAML)
+#   velaplugin-protocol   一种终端协议(§5.13.1),带测试工程与本机回显服务
+#   velaplugin-workspace  一种工作台连接类型(§5.14),带测试工程与本机回显服务
+#   --hostMode inProcess|isolated   仅前两个;协议 / 工作台模板固定 inProcess
 
 cd Snippets
 dotnet build -c Release -t:PackVpx               # → bin/vpx/acme.snippets-0.1.0.vpx
@@ -88,7 +90,7 @@ dotnet build -c Release -t:PackVpx               # → bin/vpx/acme.snippets-0.1
 生成的 `.csproj` 只有一行依赖:
 
 ```xml
-<PackageReference Include="VelaShell.PluginSdk.Build" Version="2.0.0" />
+<PackageReference Include="VelaShell.PluginSdk.Build" Version="2.0.9" />
 ```
 
 这一个包把插件工程需要的东西一并带到:契约程序集 `VelaShell.PluginSdk`、**与宿主版本
@@ -242,6 +244,31 @@ vela-plugin doctor
 不想启动整个宿主时,插件的业务逻辑可以用 `VelaShell.PluginSdk.Testing` 的
 `TestPluginContext` 在普通单测里跑(见 §7)。
 
+### 2.4 从协议 / 工作台模板起步
+
+要做的是一种新协议(Telnet、串口那一类,§5.13.1)或一种工作台连接类型(Redis、MySQL 那一类,§5.14)时,
+从 `velaplugin-protocol` / `velaplugin-workspace` 起步,省掉的正是最难写对的那几段:
+
+```bash
+dotnet new velaplugin-protocol  -n EchoProto --publisher acme   # 终端协议
+dotnet new velaplugin-workspace -n EchoDesk  --publisher acme   # 工作台连接类型
+```
+
+- **生成出来的**:插件工程在根目录(`dotnet build -t:PackVpx`、`vela-plugin dev init` 用法与其它模板一样);
+  `<名称>.Tests/` 是测试工程(MSTest + `VelaShell.PluginSdk.Testing`,版本与 `.Build` 相同);`tools/EchoServer.cs` 是本机回显服务。
+  后两者用 `DefaultItemExcludes` 挡在插件编译之外,不进 `.vpx`。根目录**不放 .slnx**:根目录同时有 .csproj 和 .slnx 时
+  `dotnet build` 会报 MSB1011。参数照其它模板(`--publisher` / `--authorName` / `--sdkVersion` / `--pluginId`),**没有 `--hostMode`**:
+  协议与工作台能力只在 inProcess 下可用;清单里写好了 `minSdkVersion: "2.0.4"`(用到了 `PluginIcon`)。
+- **试跑**:`dotnet test <名称>.Tests` 不起宿主就能跑完;要在宿主里看,另开一个终端 `dotnet run --file tools/EchoServer.cs`
+  (`--file` 不能省,原因写在文件注释里;默认监听 127.0.0.1:7007),F5 起调试宿主(§2.3),新建一条这种连接指向 `127.0.0.1:7007`,
+  敲的字(或面板里发的行)会被弹回来。
+- **要换的**(代码里标了 ✏️):协议模板是 `BuildDescriptor`、`ConnectionSettings`、`ProtocolTerminal` 与 `ProtocolSession` 里的传输;
+  工作台模板是 `LineConnection`(换成你的客户端库 —— 第三方异常不许越过插件边界)、`WorkspaceView`、`WorkspaceState`。
+  **不用动的**:注册、换语言重注册、停用撤注册;读泵 / 写闸 / 掉线归一成 EOF / 能唤醒读的关闭这些纪律原样保留。
+- **测试工程要自己开 `EnablePreviewFeatures`**(模板里已经开好):契约程序集带 `RequiresPreviewFeatures`,不开就报 CA2252。
+  测试输出里**没有 Avalonia 运行时**(SDK 包把 Avalonia 设成 compile-only,这会沿 ProjectReference 传下来),所以测试不要 JIT 到面板代码 ——
+  工作台模板的 `WorkspaceDocument` 刻意不碰 Avalonia 类型,单测能完整驱动它。
+
 ## 3. 清单(plugin.json)参考
 
 | 字段 | 必需 | 说明 |
@@ -296,7 +323,10 @@ context.Log.Info("hello");
 context.Log.Error("failed", ex);
 ```
 
-落宿主 Trace 管道,自动带 `[Plugin:<id>]` 前缀,线程安全。
+落宿主 Trace 管道,自动带 `[Plugin:<id>]` 前缀,线程安全。同时落到这个插件自己的日志文件
+`~/.velashell/logs/plugins/<id>.log`(满 1 MB 轮转一份),用户在「插件管理 → 查看日志」里看得到尾部。
+隔离插件的 `Console.WriteLine` 与未处理异常写到 stderr 的堆栈也进这份文件;插件进程里的 `Trace.WriteLine` 不会被收集,
+要让用户看到的就走 `context.Log`。
 
 ### 5.2 Storage —— 私有键值存储
 
@@ -651,6 +681,9 @@ new()
 - 控件的事件/更新由插件直接操作(标准 Avalonia 写法,`await` 后自动回 UI 线程);
   从后台线程改控件请走 `Dispatcher.UIThread`。
 - 同一控件实例只挂一个面板;面板是活控件,无"整树刷新"概念。
+- AXAML 视图调用 **Avalonia 源生成器生成的** `InitializeComponent()`;不要再手写
+  `private void InitializeComponent() => AvaloniaXamlLoader.Load(this);` —— 重载决议会挑中手写的那个,XAML 照样装载,
+  `x:Name` 字段却全是 null,构造函数里第一次用到就 NRE。(`velaplugin-ui` 模板 ≤ 2.0.1 就是这样,下一版修复。)
 - **重复触发同一目标时用 `ActivateAsync` 而不是直接 return**:同尺寸的居中窗口会把前一扇
   像素级盖住,最小化之后更是完全看不见 —— 用户只会以为点了没反应。
 - 国际化自理:按 `context.Host.Locale` 取词,订阅 `LocaleChanged` 热更新。
@@ -777,6 +810,7 @@ context.Protocols.Register(
 > 只要允许大写,`Foo.Bar` 与 `foo.bar` 就会在不同环节被判成"是"和"不是"同一个。
 
 完整示例:[`plugins/VelaShell.Plugin.S3`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.S3)(协议 + 两个管理面板 + 22 项桶配置)。
+文件协议没有模板(第一方插件里只有 S3 一个,沉淀不出公共骨架);终端协议的最快起点是 `dotnet new velaplugin-protocol`(见 §2.4)。
 
 #### 5.13.1 终端协议(`IProtocolTerminal`)
 
@@ -819,6 +853,10 @@ ValueTask       ResizeAsync(int columns, int rows, CancellationToken ct);
   但插件自己也不该在关闭路径上无限阻塞(串口 `Close()` 在硬件流控卡住时可以永久挂住)。
 - 终端协议**没有** SessionId:SFTP 面板、任务管理器、资源监视器、隧道对它自动灰掉;
   "连接后执行命令"也不会发(Telnet 连上先看到的是 `login:`,注入命令等于打进登录提示符)。
+- **换语言重注册时沿用同一个实现实例**:宿主把"同 id 换成另一个实现"视为旧实现失效,会关掉这个协议名下开着的标签页;
+  同 id、同实例的重注册按"替换"处理。**旧注册句柄直接丢弃,不要 Dispose** —— 替换之后它已不代表注册表里那一份。
+
+最快的起点:`dotnet new velaplugin-protocol`(见 §2.4)。
 
 完整示例:[`plugins/VelaShell.Plugin.Telnet`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Telnet)(RFC 854 协商 + NAWS + 8 位透明,零第三方依赖)。
 
@@ -884,6 +922,10 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 - **文档生命周期**:`CreateView()` 由宿主在 UI 线程调用一次(返回 `Control`;抛异常或返回非控件
   只会让那一个标签页显示一行说明,不会带走宿主);`StatusChanged` 驱动标签页与会话树的状态圆点;
   `ReconnectAsync` 接标签页上的"重连";用户关闭标签页或插件停用时 `DisposeAsync`。
+- **状态保存 / 还原**:SDK 没有文档状态契约(`IWorkspaceDocument` 只有 `CreateView` / `Status` / `ReconnectAsync` / `DisposeAsync`),
+  宿主也不在重启后重开这类标签页。要跨会话记住的界面状态(草稿、最近发送……),按**端点**存进 `context.Storage`
+  (走隧道时取 `request.Tunnel` 里的真实目标)。`WorkspaceConnectRequest.SessionId` 是每次打开新分配的,不能当键。
+  `OpenAsync` 与「测试」按钮那条路(Open → Dispose)不写状态,只有读回过状态的文档才写。
 - **语言切换要重注册但必须复用同一个 provider 实例**:注册表把"同 id 换成另一个实现"视为旧实现
   失效,会通知宿主关掉该类型名下所有已打开的文档 —— 用户只是切了个语言,标签页不该全没了。
 - **要在装载插件之前就出现在连接页**,须在 `plugin.json` 里同时声明:
@@ -903,6 +945,7 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 > 两者**共用同一个判定与同一个页签条带**,因此同一份清单里工作台 id 与协议 id 也不得相撞。
 
 完整示例:[`plugins/VelaShell.Plugin.Redis`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Redis)(键空间浏览器 + 类型详情 + 声明式连接表单)。
+最快的起点:`dotnet new velaplugin-workspace`(见 §2.4,默认带一个经 SSH 隧道的字段,不需要就按注释删掉)。
 
 ## 6. 隔离进程模式(isolated)
 
@@ -965,6 +1008,9 @@ public async Task Refresh_ListsContainers()
 `RecordingCommands`(可 `RunAsync` 驱动命令体)、`TestHostEvents`(Raise 方法)、
 `TestHostInfo`、`FakeUi`(记录面板与惰性内容工厂)、`FakeSecrets`、`FakeClipboard`。
 
+`velaplugin-protocol` / `velaplugin-workspace` 生成的 `<名称>.Tests` 就是本节的完整示例(激活时校验描述符、表单键与解析键一致、
+换语言不换实例、停用撤注册、对着本机回显服务收发、掉线即 EOF / 变 Faulted 后重连恢复)。
+
 ## 8. 部署、禁用与排障
 
 | 事项 | 位置/方法 |
@@ -976,7 +1022,7 @@ public async Task Refresh_ListsContainers()
 | 禁用单个插件 | 插件目录内放一个空的 `.disabled` 文件 |
 | 全局禁用(排障) | 环境变量 `VELASHELL_DISABLE_PLUGINS=1` |
 | 同 id 冲突 | 按根目录顺序先到先得(应用目录优先),后者标 Invalid |
-| 日志 | 调试输出/Trace,前缀 `[PluginManager]` 与 `[Plugin:<id>]` |
+| 日志 | 调试输出/Trace,前缀 `[PluginManager]` 与 `[Plugin:<id>]`;每个插件另有一份 `~/.velashell/logs/plugins/<id>.log`(`context.Log`、隔离进程的 stdout / stderr、宿主记的激活 / 失败 / 崩溃),在「插件管理 → 查看日志」里看尾部;卸载时删除 |
 
 ## 9. 性能与行为纪律
 
@@ -1077,17 +1123,28 @@ vela-plugin info   pkg.vpx                        # 看头部、签名状态与�
 
 | 结论 | 含义 | 宿主处置 |
 | --- | --- | --- |
-| `Unsigned` | 没有签名块 | 默认放行(第一方/自装插件场景,信任即安装) |
-| `Trusted` | 签名有效,且公钥在信任集合内(未配置信任集合时任何有效签名都算) | 放行并记一条日志 |
-| `Untrusted` | 签名有效但公钥不在信任集合内 | 默认放行;`RequireTrustedPackageSignature` 打开时拒装 |
+| `Unsigned` | 没有签名块 | 管理页先弹确认框,用户点「仍然安装」才单次放行;`RequireTrustedPackageSignature` 打开时拒装 |
+| `Trusted` | 签名有效,且公钥在信任集合内(`TrustedPackageKeys` 加上用户在管理页信任过的发布者) | 放行并记一条日志 |
+| `Untrusted` | 签名有效但公钥不在信任集合内(信任集合起初是空的,第一次见到的签名都落在这一档) | 管理页把公钥指纹摆出来,用户点「信任发布者并安装」才放行,装成之后把这把公钥收进本机信任库;`RequireTrustedPackageSignature` 打开时拒装 |
 | `Invalid` | 签名块损坏或验签失败 | **一律拒装**,不受策略宽松与否影响 —— 那是篡改,比"未签名"严重得多 |
 
 信任集合与强制开关在 `PluginManagerOptions`(`TrustedPackageKeys` /
-`RequireTrustedPackageSignature`),默认都不启用。
+`RequireTrustedPackageSignature`),出厂时集合为空、开关关着。
 
-命令行侧的口径更严一档:`vela-plugin install` 在**非交互**环境下拒装未签名包(要装得显式
-给 `--allow-unsigned`),并支持 `--trust <指纹>` 把"必须是这个人签的"写进 CI。宿主内置的
-商店界面与发布者验证仍未做,按蓝图 10 分期。
+命令行侧:`vela-plugin install` 遇到未签名包在交互终端里问一句 y/N,**非交互**环境下拒装(要装得显式
+给 `--allow-unsigned`),并支持 `--trust <指纹>` 把"必须是这个人签的"写进 CI。
+
+**发布者连续性(管理页装的才有)。** 验签只证明包签完之后没被改过,不证明签它的还是上次那个人。
+所以管理页装插件时,安装收据里会钉住签名者的公钥;此后再装同一个 id 的包(手动装 `.vpx`、或行内「更新到 x.y.z」),
+签名者对不上、或者这一版干脆没签名,宿主不判死也不静默放行,而是弹「插件的发布者变了」,把钉住的与这个包的两个指纹并排摆出来,
+用户点「仍然安装」才覆盖,新公钥随之钉成新的基线;被拒时已装的那一版原样不动(这一闸在卸载旧版之前)。
+这是首次信任 + 连续性(TOFU),不是商店认证 —— 宿主没有信任根。
+
+**旁装钉不住发布者。** 命令行 `vela-plugin install` / `update` 装的、直接放进目录的插件没有那份收据,宿主只把第一次见到的内容
+记成基线,里面没有公钥 —— 这一闸对它们闭嘴(否则命令行装的插件之后从哪条路都更新不了)。CLI 自己也不拿 `.vela-install.json`
+里记的旧指纹去比。结果是:**同一个 id、换了签名者的包覆盖上去,宿主无从拦截这种冒名的覆盖安装**,重启后只是重记一份基线。
+在乎发布者的插件请让用户经管理页装;走命令行时每次都给 `--trust <指纹>`,指纹对不上的包直接被拒。
+从管理页覆盖一个旁装的插件同样不会问「发布者变了」(没有可比对的旧身份),装成之后才开始钉。
 
 ### 12.3 安装期的其它闸门
 

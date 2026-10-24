@@ -21,16 +21,7 @@ zh/                    en/                    内容
   xserver/               xserver/             可嵌入的 X11 服务端库 VelaShell.XServer 的架构与里程碑
 ```
 
-中英两棵树同构:中文是原文,英文是翻译。**当前有 8 篇只有中文版**:
-
-| 只有中文版 | 位置 |
-| --- | --- |
-| Redis 客户端插件化调研与设计 | [`zh/host/Redis客户端插件化调研与设计.md`](zh/host/Redis客户端插件化调研与设计.md) |
-| S3 协议插件化设计 | [`zh/host/S3协议插件化设计.md`](zh/host/S3协议插件化设计.md) |
-| S3 完整支持实施报告 | [`zh/host/S3协议完整支持-实施报告-2026-08.md`](zh/host/S3协议完整支持-实施报告-2026-08.md) |
-| 系统密钥链与 sudo 凭据填充可行性调研 | [`zh/host/系统密钥链与sudo凭据填充可行性调研.md`](zh/host/系统密钥链与sudo凭据填充可行性调研.md) |
-| 凭据管理器集成设计 | [`zh/host/凭据管理器集成设计.md`](zh/host/凭据管理器集成设计.md) |
-| 三份发版流程 `release-process.md` | [`sdk`](zh/sdk/release-process.md) · [`cli`](zh/cli/release-process.md) · [`templates`](zh/templates/release-process.md) |
+中英两棵树同构:中文是原文,英文是翻译,文件一一对应 —— 每篇中文文档在 `en/` 下都有同位置的英文版。
 
 ## 快速入口
 
@@ -65,8 +56,8 @@ flowchart TB
     end
 
     subgraph Author["插件作者"]
-        SDK["velashell-plugin-sdk<br/>契约 NuGet 包"]
-        CLI["velashell-plugin-cli<br/>vela-plugin · PluginSdk.Build"]
+        SDK["velashell-plugin-sdk<br/>契约 NuGet 包 · PluginSdk.Build"]
+        CLI["velashell-plugin-cli<br/>vela-plugin"]
         TPL["velashell-plugin-templates<br/>dotnet new velaplugin"]
     end
 
@@ -99,9 +90,9 @@ flowchart TB
 | 仓库 | 内容 |
 | --- | --- |
 | [joesdu/VelaShell](https://github.com/joesdu/VelaShell) | 宿主主程序 |
-| [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) | `VelaShell.PluginSdk`、`.Testing` |
-| [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli) | `vela-plugin`、`VelaShell.PluginSdk.Build` |
-| [velashell-plugin-templates](https://github.com/VelaShellLabs/velashell-plugin-templates) | `dotnet new velaplugin` 模板 |
+| [velashell-plugin-sdk](https://github.com/VelaShellLabs/velashell-plugin-sdk) | `VelaShell.PluginSdk`、`.Testing`、`.Build`(插件工程引用的那一个包,2026-09-11 从 velashell-plugin-cli 搬来) |
+| [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli) | `vela-plugin` 命令行 |
+| [velashell-plugin-templates](https://github.com/VelaShellLabs/velashell-plugin-templates) | `dotnet new velaplugin*` 模板(基础 / 面板 / 协议 / 工作台) |
 | [velashell-plugins](https://github.com/VelaShellLabs/velashell-plugins) | 第一方插件:Redis / S3 / Telnet / 串口 / [Docker 管理面板](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.DockerPanel) |
 | [velashell-markets](https://github.com/VelaShellLabs/velashell-markets) | 插件市场:上传、审核、检索与分发 |
 | [velashell-identity](https://github.com/VelaShellLabs/velashell-identity) | 统一认证服务(OIDC / OpenIddict):生态的信任根,下游只验令牌 |

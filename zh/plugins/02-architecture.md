@@ -144,13 +144,21 @@ PluginSdk              -> PluginProtocol
   data/<pluginId>/                    -> 插件私有数据目录(storage 能力的根)
   permissions.json                    -> 授权决定持久化(见 06)
   registry-cache/                     -> 插件源索引缓存(见 10)
-  logs/<pluginId>/                    -> 插件进程 stdout/stderr 与结构化日志
+
+~/.velashell/logs/plugins/
+  <pluginId>.log / <pluginId>.1.log   -> 每个插件一份日志(满 1 MB 轮转一份,见 §6)
 ```
+
+(2026-10-24 注:蓝图原先把日志画在 `~/.velashell/plugins/logs/<pluginId>/` 下;实际落在宿主日志目录里,与宿主自己的
+`velashell-*.log` 同处一个 `logs/`,另起 `plugins/` 子目录。)
 
 ## 6. 横切关注点
 
-- **日志**:PluginHost 的 stdout/stderr 重定向落盘;SDK 提供 `vela.Log`
-  结构化日志通道,插件管理页可查看每插件日志尾部。
+- **日志**(2026-10-24 落地):每个插件一份 `~/.velashell/logs/plugins/<pluginId>.log`,满 1 MB 轮转成
+  `<pluginId>.1.log`、只留这一份旧的;一行一个时间戳,异常堆栈的续行原样保留。来源全在宿主侧:插件经 `context.Log`
+  (`IPluginLogger`)写的(进程内直调、隔离进程经 RPC 转回)、隔离进程的 stdout / stderr,以及宿主替插件记的激活 /
+  激活失败 / 崩溃;宿主日志里那份照旧。插件里的 `Trace.WriteLine` 不进这份文件(隔离进程里的哪儿都不收)。卸载时随插件数据一起删除;
+  诊断包仍只收宿主日志,不收这个子目录。插件管理页每行「查看日志」看尾部(默认 256 KB,点刷新更新,不做实时跟随)。
 - **i18n**:贡献点文案 `%key%` 间接寻址,`plugin.nls.<locale>.json` 提供
   翻译,宿主按当前语言解析后再渲染;语言切换事件推送给活跃插件。
 - **遥测**:不做(与主程序现状一致);预留崩溃计数本地统计用于退避决策。

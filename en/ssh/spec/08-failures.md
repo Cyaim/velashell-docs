@@ -26,6 +26,12 @@ Code like that silently breaks when a library upgrade changes a single word of t
 
 `Message` is for humans; it is **not** an API.
 
+〔Decision〕**Kinds finer than the reason code come out as `*Kind` enums, whose zero value is always `Unknown` (not classified)**:
+`SshChannelException.FailureKind` (`SshChannelFailureKind`), `ProblemKind` on the private key and certificate exceptions
+(`SshKeyProblemKind`), `SshAuthDetailKind` in the authentication attempt record ([04 §3.4](04-authentication.md)) and the host
+certificate's `HostCertificateProblemKind` ([03 §5.5](03-key-exchange.md)), each together with its parameters (path, algorithm name, Key ID,
+limit …). Callers write their UI wording by kind; `Message` remains Chinese text written for developers, with no promise of stable wording.
+
 〔Decision〕**Text from the peer is sanitized before it goes into `Message`**: control characters (`ESC`, `CR`, `BEL`, …), `DEL`, C1 control codes and bidirectional text controls
 are replaced with `?`, and the text is truncated to a fixed length. The identification string, the `DISCONNECT` description, the reason for refusing a channel open, SFTP status messages
 and proxy replies all come from the peer, often from a peer that has not been authenticated yet — and `Message` ends up printed to a terminal or a UI,
@@ -52,12 +58,12 @@ SshException                          Abstract base; carries Reason / Phase / Is
 ├── SshAuthenticationException        Authentication failed — carries per-method attempt records
 ├── SshProtocolException              Peer violated the protocol
 ├── SshConnectionClosedException      Connection gone (closed by peer / keep-alive timeout / DISCONNECT received / aborted locally / host key changed on rekey)
-├── SshChannelException               Channel could not be opened, or a request on the channel was refused — carries the reason code and the peer's text
+├── SshChannelException               Channel could not be opened, or a request on the channel was refused — carries the reason code, a kind and the peer's text
 ├── SshCommandFailedException         Remote command did not succeed (EnsureSuccess) — carries the full result
 ├── SshForwardException               Forwarder could not start
 ├── SshPublicKeyException             Public key blob / text malformed, type unsupported
-├── SshPrivateKeyException            Private key file cannot be read or decrypted — carries NeedsPassphrase
-├── SshCertificateException           Certificate cannot be read, or does not pair with the private key
+├── SshPrivateKeyException            Private key file cannot be read or decrypted — carries NeedsPassphrase and a kind
+├── SshCertificateException           Certificate cannot be read, or does not pair with the private key — carries a kind and both public keys
 ├── SshAgentException                 Cannot reach the agent, or the agent refused
 ├── SftpException                     SFTP operation failed — carries StatusCode and the server's original text ServerMessage
 ├── SftpTransferInterruptedException  Transfer interrupted — **carries DurableLength**
@@ -84,6 +90,13 @@ The types below have a fixed `Phase`, and their `Reason` is **reported as it act
 | `SshChannelException` | `ChannelOpenFailed` (with `OpenFailureReason`), `ChannelRequestRejected`, `LimitExceeded` (this side's channel count / session window budget reached its limit), `ProtocolError` (the peer announced a max packet of 0, so what is written to stdin cannot be sent) | `Open` |
 | `SshForwardException` | `ForwardRejected`, `ForwardBindFailed`, `ForwardSetupFailed`, `LimitExceeded`, `ProtocolError`; when agent forwarding cannot be set up because the local agent cannot be reached, the agent side's `AgentNotRunning` / `AgentUnavailable` is carried over | `Open` |
 | `SftpTransferInterruptedException` | Follows the cause of the interruption (the inner exception): a dropped connection is `ClosedByPeer`; a write the server rejected (disk full, quota, permission) takes the reason code of the inner `SftpException`; caller cancellation and local disposal are `Aborted`; a timeout waiting for acknowledgements on close is `Timeout`. 〔Decision〕It used to be fixed at `ClosedByPeer`, so callers deciding by reason code would treat "disk full" as a dropped connection and try to resume anyway | `Open` |
+
+Kinds finer than `Reason` (§1): `SshPrivateKeyException` / `SshCertificateException` carry `ProblemKind` (`SshKeyProblemKind`, shared by
+both), `Origin` (the file path, the origin given to `Parse`, or the key's name in the key store — filled in by the entry point before the
+exception leaves the library) and `AlgorithmName`; certificates also carry `KeyId`, `CertificateKey` and `SignerKey` (the two public keys
+when they do not pair, so a UI can show fingerprints). The dozens of "the file is broken" variants are merged into `Malformed`, with the
+details left in the inner message. `SshChannelException` carries `FailureKind` (`SshChannelFailureKind`) and `ChannelType` /
+`SubsystemName` / `Limit`; the kinds are in [05 §2.3](05-connection.md).
 
 Reading a private key, reading a certificate and parsing a public key happen outside any connection (there may be no connection at all), so `Phase` is `None`.
 When parsing the peer's host key fails during key exchange, the key exchange wraps it into an `SshConnectException` with `Reason` `HostKeyRejected`.
@@ -295,6 +308,9 @@ IReadOnlyList<AuthAttempt> Attempts      // see 04-authentication.md §3.4
 IReadOnlyList<string>      ServerOffered // the methods the server last offered
 bool                       PartialSuccessAchieved
 ```
+
+Every attempt carries `Details` (kinds plus parameters, see [04 §3.4](04-authentication.md)); a UI writes the per-attempt lines in its own
+language from them and never parses `Detail`.
 
 `SkippedNotOffered` / `SkippedNoMaterial` in `AuthAttempt.Outcome` are the key:
 without them, "the private key file could not be read" and "the server does not accept public key authentication" show up in the UI as the same

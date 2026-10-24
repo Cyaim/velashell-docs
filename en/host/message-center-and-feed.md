@@ -73,13 +73,24 @@ index, and `SettingsSectionKeyTests` pins the two together — inserting a page 
 section list without updating the enum fails the test outright instead of silently landing on the
 neighbouring page.
 
-**Manual updates on Linux (from 2026-10-08)**: when About → Check for updates finds a newer version
-with a package for the current platform, it opens the GitHub Releases list in the default browser.
-The user chooses a deb, rpm or portable package to download and install. Linux no longer checks
-whether the installation directory is writable, downloads packages automatically or replaces the
-running installation. The status includes the new version and release-page address, which remains
-available if the browser cannot start. The releases list includes prereleases for the preview channel.
-Startup checks still only post a notification and never open the browser automatically.
+**Manual updates on Linux (from 2026-10-08; the matching package directly since 2026-10-24)**: when About → Check for
+updates finds a newer version with a package for the current platform, it opens, in the default browser, the download
+link of the package that matches **how VelaShell is installed**, for that version; the user installs it manually once
+downloaded. The installation kind is read only from the file-system traces the packaging scripts leave — no guessing the
+distribution, and no `dpkg -S` / `rpm -qf` subprocess:
+
+- `APPIMAGE` is set and the app directory is inside the `APPDIR` mount → AppImage (`VelaShell-<version>-<RID>.AppImage`);
+- the app directory is `/opt/velashell` and there is a dpkg record (`/var/lib/dpkg/info/velashell.list`, or one with
+  `:amd64` / `:arm64`) → deb; no dpkg record but an rpm database (`/var/lib/rpm` or `/usr/lib/sysimage/rpm`) → rpm;
+  neither → unknown;
+- anywhere else → the portable tar.gz (taken straight from the manifest).
+
+The status includes the file name and the address, which remains available if the browser cannot start. Prerelease
+deb / rpm names contain `~`, and GitHub attachment names have no dependable convention for such characters, so instead of
+guessing it opens that version's release page; when the installation kind is unknown, the architecture unsupported or
+there is no manifest, it opens the whole releases list as before (prereleases included, for the preview channel). Linux
+still does not check whether the installation directory is writable, download packages automatically or replace the
+running installation. Startup checks still only post a notification and never open the browser automatically.
 The Windows and macOS update flows are unchanged.
 
 **Changelog entry and fixed targets (2026-10-21)**: messages still navigate to About; reading one does not download an update or restart the app. About → Changelog first reads the latest stable release's `releases/latest/download/latest.json`. A stable version newer than the installed version shows its notes with “Update available”; otherwise show the installed tag's notes with “Current version.” When no newer stable release exists, reuse the response if latest equals the installed version; only read the installed version's manifest if its notes are needed and that response cannot be reused, using `releases/download/<tag>/latest.json`. The installed tag may be a prerelease; this is not current-version-first or parallel rendering. This entry neither reads nor changes preview update settings and does not replace the existing channel logic of About → Check for Updates or startup checks.
@@ -207,15 +218,34 @@ executable specification for this contract.
 Independent of the feed. On startup, subject to Settings → General → Check for updates on startup, a
 check runs; if a newer version exists, a message is posted that lands on the About page.
 
+- **Whether it checks**: "Check for updates on startup" is the network master switch — when off, not a single request is
+  sent; when on, the check runs only if "Announce available updates" (message center section) or "Download updates
+  automatically" is on — somebody has to want the result.
 - The id looks like `update:1.4.0`. The same version is republished on every startup and de-duplicated
   by that id, keeping its read state; a genuinely newer version is a new id and lights up as unread.
+- **Automatic download (since 2026-10-24, off by default)**: with "Download updates automatically" on and an installation
+  that can update itself in place (a writable install directory on Windows / macOS; not Linux, the Store version or a
+  read-only directory), a newer version is first downloaded in the background and verified against its SHA-256. It uses
+  the same download path and the same busy state as About → Check for updates — progress shows if the About page is open,
+  "Check for updates" does not start a second download, and the background download stands aside while the About page is
+  already downloading; a package already prepared is taken as is.
+  - When it is ready, `update-ready:<version>` is posted: title "VelaShell X is ready to install", action "Restart to
+    update" (`app.settings.about`); it **never restarts by itself**. The id is separate from `update:<version>`, so an
+    "update available" message already read lights up again.
+  - When the download fails nothing pops up: it falls back to the plain `update:<version>`, and the About page's status
+    line says it couldn't be downloaded in the background and will be retried at the next startup check; the user can also
+    click "Check for updates" to try again.
+  - With "Announce available updates" off and automatic download on, it still checks and downloads, it just posts nothing.
+- The update item is posted **separately** from the feed and the crash notice: a download can take minutes, so the feed
+  and the crash notice go first instead of waiting behind it.
 - **Store (MSIX) builds skip it entirely**: the install directory is read-only and updates are managed
   by the Microsoft Store. About can display notes but cannot download/install an update, so no “go to About to update” reminder is posted.
 
 > This fixed something along the way: `General.CheckUpdatesOnStartup` previously had no consumer
 > anywhere in the repository (settings audit R-01 judged it "the update service is not wired up" and
 > hid it). It now genuinely decides whether the startup check runs, and is therefore visible again on
-> the General page. Update channel and auto-download remain unwired and stay hidden.
+> the General page. Update channel remains unwired and stays hidden; automatic download was wired on 2026-10-24 (settings
+> audit R-03).
 
 ## 5. Storage and limits
 

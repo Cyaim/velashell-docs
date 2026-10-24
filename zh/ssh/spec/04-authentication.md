@@ -195,12 +195,35 @@ RFC 4252 §5 允许中途改用户名，但服务端行为未定义 —— 我�
 | --- | --- |
 | `Method` | 方法名 |
 | `CredentialLabel` | 使用者给凭据起的名字（如私钥路径），**不含任何密钥材料** |
+| `BridgedCredentialLabel` | 口令凭据改走 keyboard-interactive 时，原来那条凭据的标签；`CredentialLabel` 此时是它加「（经 keyboard-interactive）」。别的时候为 `null` |
 | `Outcome` | `Success` / `PartialSuccess` / `Failure` / `SkippedNotOffered` / `SkippedNoMaterial` |
 | `ServerOfferedAfter` | 这一步之后服务端给出的方法列表 |
-| `Detail` | 例如「私钥文件读不出来」「服务端不接受这把公钥」；证书被拒时的线索见 §4.5 |
+| `Detail` | 拼好的中文说明（给日志与诊断面板），例如「私钥文件读不出来」「服务端不接受这把公钥」；证书被拒时的线索见 §4.5。结构化出处在 `Details` |
+| `Details` | `SshAuthDetail` 的列表：每条是 `Kind`（`SshAuthDetailKind`）加参数，种类与参数见下表 |
 | `SignatureAlgorithm` | `publickey` 这一步用的签名算法（降级重试过的记重试那一个）；别的方法、没签就跳过的为 `null` |
 
 它的存在理由很具体：**要让「这台机器需要动态码」和「密码打错了」在 UI 上能区分开。**
+
+〔决策〕**界面按 `Details` 的种类与参数用自己的语言拼，不解析 `Detail`。** `Detail` 由 `Details` 拼成：第一段照写，后面的用全角括号括起来接上，
+证书线索合成一段、用「；」隔开。参数是原值 —— 来自服务端或证书的文本（服务端原话、Key ID、主体、算法名）没有清洗，摆上界面之前由使用者清洗
+（宿主过 `PeerText.Sanitize`，与 `SftpException.ServerMessage` 同一口径）。零值 `Unknown` 表示「没归类」，库自己不产生。
+
+| 种类（`SshAuthDetailKind`） | 用到的参数 |
+| --- | --- |
+| `ServerAccepts` | `Methods` |
+| `MethodNotOffered` | `Methods` |
+| `MethodFailureLimit` | `Method`、`Count` |
+| `PublicKeyNotAccepted` | — |
+| `PasswordChanged` / `PasswordChangeFailed` / `PasswordChangeNotConfigured` | — |
+| `NewPasswordRejected` | `Count`、`ServerText` |
+| `NewPasswordNotProvided` | — |
+| `CredentialFailed` | `Error` |
+| `NoUsableSignatureAlgorithm` | `KeyType` |
+| `Sha1Fallback` | `Algorithm`、`FallbackAlgorithm` |
+| `Sha1Signature` | `Algorithm` |
+| `CertificateExpired` / `CertificateNotYetValid` | `KeyId`、`Time` |
+| `HostCertificateForLogin` | `KeyId` |
+| `PrincipalNotListed` | `Principals`、`UserName` |
 
 〔决策〕**`SkippedNoMaterial` 只记「凭据自己出的问题」**：取口令的回调、keyboard-interactive 的应答回调、
 签名器（本地私钥、agent、外部签名）抛出的异常 —— 包括 agent 拒签这类库自己的异常类型。
@@ -311,9 +334,10 @@ string    公钥 blob
 〔决策〕**降级默认关闭**（`AllowSha1RsaSignatures = false`）。
 理由：无条件降级会把 Terrapin 那类降级攻击的收益还回去。
 需要连老服务器的人显式打开 —— 最需要它的恰恰是不发 `server-sig-algs` 的老服务器，所以上表第三行的重试不可少。
-降级重试时，尝试记录（`SshAuthAttempt.Detail`）写明「`rsa-sha2-512` 被拒后降级为 `ssh-rsa`（SHA-1）重试」。
+降级重试时，尝试记录（`SshAuthAttempt.Detail`）写明「`rsa-sha2-512` 被拒后降级为 `ssh-rsa`（SHA-1）重试」，结构化为 `Sha1Fallback`（§3.4）。
 〔决策〕**每一步 `publickey` 都把用的签名算法记进 `SshAuthAttempt.SignatureAlgorithm`**；没有降级、直接挑中 SHA-1 的
-`ssh-rsa`（`server-sig-algs` 里能用的只有它，或这把钥只给得出它）时，`Detail` 也写一笔「用的是 SHA-1 签名」。
+`ssh-rsa`（`server-sig-algs` 里能用的只有它，或这把钥只给得出它）时，`Detail` 也写一笔「用的是 SHA-1 签名」（`Sha1Signature`）。
+只剩被禁用的 SHA-1 `ssh-rsa`、一个算法都挑不出时，这条凭据按「材料有问题」跳过（`SkippedNoMaterial`），记 `NoUsableSignatureAlgorithm`，什么都不发。
 〔历史〕早期只有降级重试才进记录，直接选中 SHA-1 时记录里看不出来。
 
 〔注意〕**判断「是不是 SHA-1」之前先去掉证书后缀**（`SshPublicKey.StripCertificateSuffix`）。
@@ -349,6 +373,7 @@ RSA 证书（§4.5）的三个算法名是 `rsa-sha2-512-cert-v01@openssh.com`�
 本地校验只会在时钟不同步时制造假阴性。〔决策〕**证书被拒时，把本地看得出的事实放进 `SshAuthAttempt.Detail`**
 —— 认证失败时这是头号线索：按本机时钟已过期 / 还没生效（带 Key ID 与时刻，话里带着「按本机时钟」）、是主机证书、
 登录用户不在 principals 里（列出证书签给了谁；principals 为空表示对所有用户有效，不算）。只在被拒之后写，不在本地拦着不发。
+四种线索在 `Details` 里分别是 `CertificateExpired` / `CertificateNotYetValid` / `HostCertificateForLogin` / `PrincipalNotListed`（§3.4）。
 agent 里的证书身份（签名器只交得出 blob）同样从 blob 解出证书来看。
 〔历史〕早期认证器不看证书，`Detail` 里没有这些；要在界面上说「证书过期了」得使用者自己拿 `IsTimeValid` 判断。
 有效期仍由 `OpenSshCertificate.ValidBeforeTime` / `IsTimeValid` 交给使用者。
@@ -544,7 +569,8 @@ PKCS#11 令牌与 macOS Secure Enclave 不在这一步（`ISshSigner` 扩展点�
 服务端的应答（RFC 4252 §8）：放行 = 改成了，并且登录成功；`FAILURE` 带 partial = 改成了，还要后续认证；
 `FAILURE` 不带 partial = **没改成**（不支持改密码，或旧密码不对）；再回 `PASSWD_CHANGEREQ` = 新密码不被接受（太简单之类），
 再问一次回调，`Attempt` 递增，**最多 `PasswordCredential.MaxNewPasswordAttempts`（3）次**。
-没配回调、回调返回 `null`（这次不改）、没改成、问够了次数，都记为这条口令凭据的一次失败，`Detail` 写明是哪一种；
+没配回调、回调返回 `null`（这次不改）、没改成、问够了次数，都记为这条口令凭据的一次失败，`Detail` 写明是哪一种
+（`Details` 里依次对应 `PasswordChangeNotConfigured`、`NewPasswordNotProvided`、`PasswordChangeFailed`、`NewPasswordRejected`，改成了是 `PasswordChanged`）；
 方法用尽时报 `PasswordExpired`（而不是笼统的「方法用尽」）。回调抛 `OperationCanceledException` 与键盘交互的回调同一个口径（`Aborted`）。
 
 〔决策〕**协议里没有「再输一次」这一步**：输错了的新密码会直接成为账户的密码。所以让用户输两遍、自己比对是界面的事，

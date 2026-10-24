@@ -7,7 +7,7 @@
 >   随包分发的打包器)、`VelaShell.Plugin.Cli`(dotnet tool `vela-plugin`)、
 >   `VelaShell.Plugin.Templates`(`dotnet new`)。没有 `VelaShell.PluginProtocol` 这个包 ——
 >   RPC 线协议就在契约程序集里(轻量协议,不用 StreamJsonRpc,见 05 注记)。
-> - 模板是 **`velaplugin` / `velaplugin-ui`** 两个;`velaplugin-automation` 待自动化能力域动工再说。
+> - 模板是 **`velaplugin` / `velaplugin-ui` / `velaplugin-protocol` / `velaplugin-workspace`** 四个(后两个是终端协议与工作台连接类型,自带测试工程与本机回显服务);`velaplugin-automation` 待自动化能力域动工再说。
 > - 测试替身叫 **`TestPluginContext`** 而不是 `FakePluginContext`;VelaUI 声明式树按用户决策不做,
 >   因此没有 `VelaUiAssert`。
 > - `vela-plugin` 的子命令:`validate` / `pack` / `sign` / `verify` / `info` / `unpack` /
@@ -30,7 +30,7 @@ F5 断点调试开箱即用。开发者体验是插件生态成败的第一因�
 | --- | --- | --- |
 | `VelaShell.PluginSdk` | NuGet 包 | 入口约定、`IPluginContext` 与全部能力代理、VelaUI 构建器、测试替身(`FakePluginContext`) |
 | `VelaShell.PluginProtocol` | NuGet 包(SDK 依赖自动引入) | RPC 契约与 DTO;插件项目一般不直接引用 |
-| `VelaShell.Plugin.Templates` | `dotnet new` 模板包 | `velaplugin`(基础)、`velaplugin-ui`(带 VelaUI 面板)、`velaplugin-automation` |
+| `VelaShell.Plugin.Templates` | `dotnet new` 模板包 | `velaplugin`(基础)、`velaplugin-ui`(带 Avalonia 面板;VelaUI 声明式树已不做)、`velaplugin-protocol`(终端协议)、`velaplugin-workspace`(工作台连接类型)、`velaplugin-automation` |
 | `vela-plugin` | dotnet tool | `new/pack/validate/sign/install/dev` 子命令 |
 | 文档站 | docs 站点(先仓库内 markdown) | 快速开始、API 参考(DocFX 由 XML 注释生成)、场景教程 ×3(对应三个官方示例) |
 | `samples/plugins/` | 仓库源码 | image-viewer / mp3-player / auto-runner,持续随 SDK 编译,是活文档也是回归测试 |

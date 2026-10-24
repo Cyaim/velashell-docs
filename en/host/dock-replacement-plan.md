@@ -11,7 +11,8 @@
 ## 1. Current-State Analysis: Actual Use of Dock.Avalonia
 
 After a repository-wide audit, Dock's integration surface is **highly concentrated**, and only a small portion of its capabilities is used
-(a single document area, with no floating windows, tool panels, Pin, or layout serialization):
+(a single document area, with no floating windows, tool panels, Pin, or layout serialization; layout serialization was added later with
+layout templates, outside the model layer — see the 2026-10-24 note in §2.1):
 
 ### 1.1 Code Integration Points
 
@@ -47,6 +48,9 @@ After a repository-wide audit, Dock's integration surface is **highly concentrat
    (Note 2026-09-27: Pin here means the old Dock kind that pins a panel to the side as auto-hide, and that is still out.
    Pinned tabs on the tab strip (Visual Studio style: pinned tabs come first and bulk closes skip them) are a different
    thing, added with #521; see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §4B.5.)
+   (Note 2026-10-24: "no "+" new-tab button" no longer holds. The tab strip now has a "+": clicking it is the same as pressing
+   `Ctrl+T` in that pane and runs the same new-tab command; the docking layer only reports which pane, and knows nothing about
+   sessions — see §2.4 below and [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §4B.1.)
 10. **Empty-group collapse**: after the last tab in a split-off group is closed, automatically remove the group and promote its sibling; **the root** never disappears.
     (Corrected 2026-09-10: this used to read "the primary group never disappears". Pinning that exemption to one
     specific instance turns a primary group that was dragged aside and then emptied into a blank nobody can get rid of —
@@ -65,6 +69,13 @@ After a repository-wide audit, Dock's integration surface is **highly concentrat
 
 - **Build only what is used**: document-style tab groups + binary/multi-way split tree + dragging. No floating windows, Pin,
   tool panels, or layout serialization (unused; extension points are sufficient).
+  (Note 2026-10-24: layout serialization arrived with named layout templates and "Restore split layout", but outside the model layer —
+  `Docking/DockLayoutSnapshot` captures the workspace as a Core `LayoutTemplate` tree (`Core/Layouts`), or builds an empty split skeleton
+  from one; what a document is and how to reopen it is handed in by the host as a delegate, so the model stays pure INPC and knows nothing
+  about templates. The model layer gained only three things for it: `DockWorkspace.PlacementResolver` (an external say on where a new
+  document lands; null falls back to the default rule in §2.3), `InsertLayout` (inserts a whole subtree: on an empty workspace it becomes
+  the whole layout, otherwise it goes into a column on the right) and the `DocumentReplaced` event (moves the bookkeeping over when a
+  placeholder is replaced in place by the real document).)
 - **Separate model and visuals**: pure `INotifyPropertyChanged` models (unit-testable, with no Avalonia dependency);
   the control layer renders from the model. Introduce no new framework and do not depend on ReactiveUI (existing use in the App layer continues).
 - **View retention built in**: the workspace control internally maintains a `document → view` cache, naturally replacing
@@ -134,6 +145,14 @@ Docking/
   and use `ReparentingHost` in the content area for cached views. Tab strip = `ScrollViewer` (hidden scrollbar) +
   three overflow buttons (reuse `WidthOverflowConverter` and `tab-nav` styles; scrolling moves to code-behind,
   removing Dock's `ScrollViewerLineCommand`/converter).
+  (Added 2026-10-24: whether a horizontal strip sits at the top or the bottom follows the workspace-level
+  `DockWorkspace.TabsAtBottom` (the "Tab bar position" setting; every pane changes together), while left / right is still each
+  group's `TabsPosition` — which is why `DockTabsPosition` has no Bottom. Overflow is now judged by `TabStripOverflowConverter`
+  along the strip's axis — width for horizontal strips, height for vertical ones — and the mouse wheel, the scroll buttons and their
+  enabled state use the same axis; vertical strips scroll `Offset.Y`, with the three buttons at the strip's foot. The strip's "+"
+  only reports which pane through `DockWorkspaceControl.NewTabRequested(DockGroup)` (the pane is made active first, so the new
+  document lands there by the placement rule in §2.3); what to open is the host's call, and the button is hidden when nobody
+  subscribes.)
 - Inline the existing tab visual specification directly on `DockTabItem` (no longer need the indirect Icon/Header/CloseTemplate three-template layer):
   status dot, accent bar, title + resource hover, close button; selectors rewritten in `DockStyles.axaml` control the styles through classes, with no visual change.
 - Rebuild the context menu on `DockTabItem`, with commands wired directly to `DockWorkspace` operations; menu items remain unchanged.

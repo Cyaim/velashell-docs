@@ -12,11 +12,11 @@
 
 | 包                              | 出自哪个仓库                                                                              | 谁引用                   | 内容                                                                                         |
 | ------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------- |
-| **`VelaShell.PluginSdk.Build`** | [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli)             | **插件工程(只引这一个)** | MSBuild props/targets、锁定版本的 Avalonia、随包分发的打包器、清单校验、`PackVpx` 目标       |
+| **`VelaShell.PluginSdk.Build`** | 本仓库(2026-09-11 起;此前在 velashell-plugin-cli)                                         | **插件工程(只引这一个)** | MSBuild props/targets、锁定版本的 Avalonia、随包分发的打包器、清单校验、`PackVpx` 目标       |
 | `VelaShell.PluginSdk`           | 本仓库                                                                                    | 由上者传递引入           | 契约程序集:入口接口、`IPluginContext` 与全部能力接口、DTO、清单模型、`.vpx` 容器、宿主注册表 |
 | `VelaShell.PluginSdk.Testing`   | 本仓库                                                                                    | 插件的**测试**工程       | `TestPluginContext` 与各能力的内存替身                                                       |
 | `VelaShell.Plugin.Cli`          | [velashell-plugin-cli](https://github.com/VelaShellLabs/velashell-plugin-cli)             | 开发者机器(dotnet tool)  | `vela-plugin`:开发内环、校验、打包、签名、体检                                               |
-| `VelaShell.Plugin.Templates`    | [velashell-plugin-templates](https://github.com/VelaShellLabs/velashell-plugin-templates) | 开发者机器               | `dotnet new velaplugin` / `velaplugin-ui`                                                    |
+| `VelaShell.Plugin.Templates`    | [velashell-plugin-templates](https://github.com/VelaShellLabs/velashell-plugin-templates) | 开发者机器               | `dotnet new velaplugin` / `velaplugin-ui` / `velaplugin-protocol` / `velaplugin-workspace` |
 
 插件工程要写的那一行 `PackageReference`(**含当前版本号**)在[开发指南](../templates/dev-guide.md)里 ——
 那个版本号属于 `VelaShell.PluginSdk.Build`,与本仓库的 SDK 版本各走各的线,
@@ -69,7 +69,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 | `PluginId` / `PluginVersion` | 来自 `plugin.json`                                                                                                          |
 | `DataDirectory`              | 插件私有目录(已创建)。**一切本地写入都应限于此**,卸载时整体删除                                                             |
 | `Host` (`IHostInfo`)         | 宿主版本、apiLevel、当前语言。`Host.Theme` 只有 `dark`/`light`/`system` 三个粗粒度值,主题的实际身份与配色看 §3.5 的 `Theme` |
-| `Log` (`IPluginLogger`)      | `Debug/Info/Warn/Error`,写进宿主日志管道(带插件 id 前缀)                                                                    |
+| `Log` (`IPluginLogger`)      | `Debug/Info/Warn/Error`,写进宿主日志管道(带插件 id 前缀),同时落到这个插件自己的日志文件 `~/.velashell/logs/plugins/<id>.log`,用户在插件管理页「查看日志」就能看到 |
 | `Shutdown`                   | 停机令牌:触发后能力调用可能开始失败,应尽快收尾                                                                              |
 
 ### 3.2 数据
@@ -137,9 +137,9 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主与 AI 的接线使用独立任务提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。当前宿主连接边界不能证明重连后的服务器密钥、账户与远端命名空间一致，因此 `ResumeTransferAsync` 明确报不支持、`CanResume=false`；接口存在不代表恢复已实现，`Unknown` 不自动重传。
 
-### 3.3c 独立下载任务（SDK TBD，未发布）
+### 3.3c 独立下载任务（SDK 2.1.2）
 
-下载契约源码已就位，**正式版本为 TBD，发版时替换**；它不属于上节已发布的 2.1.1。宿主与 AI 接线已编写，但正式包尚缺新类型，下游构建/下载回归受阻，不能宣称整链已可运行或平台矩阵已通过。需要正式发布 SDK 后，由维护者确认版本，升级宿主 `src/Directory.Packages.props`、`tests/Directory.Packages.props`、AI 显式包依赖及清单 `minSdkVersion`；不猜版本、不造本地包或绕过 NuGet。
+**独立下载任务契约已随 SDK 2.1.2 正式发布到 NuGet.org。** 宿主 `src/Directory.Packages.props` 与 `tests/Directory.Packages.props` 的中央依赖、测试替身及 AI 插件显式引用统一使用 2.1.2，AI 清单要求 `minSdkVersion: 2.1.2`（`apiLevel: 2`）；不使用本地包或临时包源。契约发布不等于所有宿主具备执行器，调用方仍须检查 `SupportsDownloadOperations`。
 
 - `IRemoteFsApi.SupportsDownloadOperations` 和 `HandshakeResponse.SupportsDownloadOperations` 独立于上传能力，默认 `false`；不支持即明确拒绝，不降级旧同步 `DownloadFileAsync`。
 - `StartDownloadAsync(sessionId, remotePath, localPath, RemoteDownloadOptions, ct)` 返回后台任务快照。`RemoteDownloadOptions` 含必填 `OperationId`、`Overwrite=false`、`Timeout=null`（无默认执行死线）；请求令牌只取消本次回执等待，不取消已登记下载。内容按流处理，没有 AI 固定大小上限，继续服从磁盘、权限、用户下载带宽与共享资源预算。
@@ -152,7 +152,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 **当前安全提交支持 Windows 固定本地 NTFS 与 Linux / macOS（x64、arm64）的本地文件系统。** 两边都在审批之前钉住目标目录链，建临时文件、提交与清理都相对钉住的父目录进行。Windows 逐段持有带遍历 + 读属性权限的祖先目录句柄，共享读写、不共享删除（只读属性的句柄不参与共享检查，带上遍历权限才算数），祖先改不了名、挪不走；只拒名字代理类重解析点（符号链接、目录联接、挂载点），云文件占位符等过滤器标记不算链接；在钉住的父目录里独占 `CreateNew` 随机临时文件并按句柄核验其位置，提交经 `NtSetInformationFile` 相对父目录句柄、只给末级名字。Linux / macOS 先把父目录解析成真实路径并写进快照的 `LocalPath`，再从 `/` 起逐级 `openat(O_DIRECTORY | O_NOFOLLOW)`、只留父目录 fd，链上任何一级是符号链接即拒绝；只收本地、按 inode 寻址的文件系统（Linux 按 `statfs.f_type` 白名单，macOS 看 `MNT_LOCAL`），9p / SMB / FUSE / NFS 在审批前拒绝；临时文件 `O_CREAT | O_EXCL | O_NOFOLLOW` 独占新建并持有 flock，无替换提交用 `renameat2(RENAME_NOREPLACE)` / `renameatx_np(RENAME_EXCL)`，标志不被支持时退到 `linkat` + `unlinkat`，覆盖用 `renameat`；新建文件权限按 umask 收窄，覆盖时沿用旧文件的权限位（不带 setuid / setgid / sticky）。默认原子无替换，目标中途出现也不覆盖；只有明确批准覆盖才替换，不先删最终目标。打开目标时清扫同目录崩溃遗留的 `.vela-download-<48 位十六进制>`，只删名字逐字对得上且没有任务在用的，同形链接只删链接本身。UNC、非 NTFS/非固定盘、其它文件系统及不支持后端明确拒绝，`ErrorCode` 为 `not-supported`，不退回直接写最终路径。用户最终路径不交给旧同步下载；时间戳偏好应用于任务持有的临时句柄。
 
-检查实际长度、传输前后远端元数据，并使用可用的摘要能力；不强制纯 SFTP 账号提供 exec，也不默认第二遍整文件下载。检测源变化则失败，但这些检查**不是远端原子快照保证**。支持范围是当前源码约束，不是已经完成的跨平台或真实 SSH/GUI 验证。AI 生命周期与终态通知见 [自动化与 AI §1.7](../plugins/11-automation-and-ai.md#17-ai-双入口后台下载sdk-tbd未发布)。
+检查实际长度、传输前后远端元数据，并使用可用的摘要能力；不强制纯 SFTP 账号提供 exec，也不默认第二遍整文件下载。检测源变化则失败，但这些检查**不是远端原子快照保证**。提交用例在 Windows 与 Linux（WSL Debian 的 ext4 与 tmpfs）上实际跑过，macOS 只经 CI；这不是真实 SSH/GUI 整链验证。AI 生命周期与终态通知见 [自动化与 AI §1.7](../plugins/11-automation-and-ai.md#17-ai-双入口后台下载sdk-212)。
 
 ### 3.4 界面与扩展点
 
@@ -204,7 +204,7 @@ ctx.Theme.Changed += info => { /* Current 与 Colors 都已是新值 */ };
 
 ### 3.6 标签页图标(`PluginIcon`,SDK 2.0.4)
 
-宿主的会话标签页按连接类型画图标(SSH 一个字形、SFTP / FTP 一个字形)。
+宿主的会话标签页按连接类型画图标(SSH 一个字形、SFTP / FTP 一个字形,本地终端不画;口径见[交互与界面规格 §4B.2](../host/交互与界面规格.md#4b2-单个标签页tab内容))。
 **插件的标签默认是一个通用插头** —— 宿主不认识你是 Redis 还是别的什么,也不该认识:
 宿主里维护一张「插件 id → 图标」的对照表,第三方插件永远进不去。
 
@@ -217,6 +217,17 @@ ctx.Theme.Changed += info => { /* Current 与 Colors 都已是新值 */ };
 | `PanelOptions.Icon` | 该面板的标签**以及窗口模式下的标题栏** | 每次开面板一份 |
 
 最后一处是「每次一份」而不是「一个插件一份」:同一个插件开的聊天页与设置页可以各画各的。
+
+`PluginIcon` 只有三个字段(`init`,record 类型):
+
+| 字段 | 类型 / 默认 | 含义 |
+| --- | --- | --- |
+| `PathData` | `string`,**必填** | SVG 路径数据,多段用空格连写即可。宿主解析失败时当作没给 |
+| `ViewBoxSize` | `double`,默认 `24` | `PathData` 的原生视框边长(lucide 那套恒为 24)。宿主收到非正数或非有限值时按 24 处理 |
+| `IsFilled` | `bool`,默认 `false` | 是否为实心填充图形;`false` 按描边渲染 |
+
+宿主画的颜色不由插件定:会话标签(协议 / 工作台)上描边与填充都用这台连接的标识色(与标签上的色条同色),
+面板标签用强调色。用户在连接配置里自己挑了标签页图标时,它压过插件自报的这一枚。
 
 两个便捷构造覆盖了全部真实用法:
 
@@ -273,6 +284,8 @@ Icon = PluginIcon.Filled(RedisLogoPathData, viewBoxSize: 1030)
 | **2.0.4**   | 标签页图标收成一个入口 `PluginIcon`(见 §3.6),三处共用:`ProtocolDescriptor.Icon`、`WorkspaceDescriptor.Icon`,以及**新增的** `PanelOptions.Icon` —— 面板标签走的不是描述符那条路,2.0.3 漏了它。带 `PluginIcon.Stroked` / `PluginIcon.Filled` 两个便捷构造。 | 用到就要(`2.0.4`)                           |
 | **2.0.6** | `IProtocolStreamUpload`:`IProtocolFileSystem` 可**选择**兼实现的接口 —— 把一条顺序读的流写成远端文件(覆盖)。宿主据此把文件在两个远程会话之间经内存中转,而不必先落一份临时文件(「远程 + 远程」双栏文件标签)。流归调用方;可能不可 Seek,长度单独给出;不续传。不实现完全合法:宿主就把这个协议当作不支持从流上传。只增不改,`apiLevel` 不变。 | 用到就要(`2.0.6`) |
 | **2.1.0** | `StreamSudoAsync`、sudo 非敏感事件/结果与专用测试替身；执行操作握手、取消及有序完整通知。已正式发布，见 §3.3a。 | 用到就要（`2.1.0`）；AI 清单已声明 |
+| **2.1.1** | 独立上传任务：`SupportsTransferOperations`、`StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`、`RemoteTransferSnapshot` 与 `fs/transfer/*` RPC。已正式发布，见 §3.3b。 | 用到就要（`2.1.1`） |
+| **2.1.2** | 独立下载任务：`SupportsDownloadOperations`、`StartDownloadAsync` / `RemoteDownloadOptions`，快照加 `Direction` / `Phase`，`fs/transfer/startDownload` RPC。已正式发布，见 §3.3c。 | 用到就要（`2.1.2`）；AI 清单已声明 |
 
 ### 2.0 迁移
 

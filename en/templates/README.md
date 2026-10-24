@@ -7,10 +7,10 @@
 | --- | --- |
 | [dev-guide.md](dev-guide.md) | **Dev guide**: getting started, manifest, lifecycle, capability APIs, isolation modes, testing, deployment, performance discipline |
 | [publishing.md](publishing.md) | **Packaging and publishing**: Release builds, `.vpx`, signing and trust, shipping to the [marketplace](http://market.easilynet.top), CI packaging |
+| [release-process.md](release-process.md) | **How `velashell-plugin-templates` is released**: the templates package's Release flow, what each of the two version numbers is for, NuGet Trusted Publishing setup |
 
 Repository: [velashell-plugin-templates](https://github.com/VelaShellLabs/velashell-plugin-templates)
-(`dotnet new velaplugin` / `velaplugin-ui`). Its release process is documented in Chinese only:
-[`../../zh/templates/release-process.md`](../../zh/templates/release-process.md).
+(`dotnet new velaplugin` / `velaplugin-ui` / `velaplugin-protocol` / `velaplugin-workspace` templates).
 
 Writing your first plugin, read in this order: [dev-guide.md](dev-guide.md) →
 [CLI manual](../cli/cli.md) → [publishing.md](publishing.md), with the

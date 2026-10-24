@@ -24,6 +24,10 @@
 
 `Message` 是给人看的，**不是** API。
 
+〔决策〕**比原因码更细的种类用 `*Kind` 枚举交出，零值一律是 `Unknown`（没归类）**：`SshChannelException.FailureKind`（`SshChannelFailureKind`）、
+私钥与证书异常的 `ProblemKind`（`SshKeyProblemKind`）、认证尝试记录的 `SshAuthDetailKind`（[04 §3.4](04-authentication.md)）、主机证书的 `HostCertificateProblemKind`（[03 §5.5](03-key-exchange.md)），
+都连同各自的参数（路径、算法名、Key ID、上限……）一起交出。调用方按种类写界面文案；`Message` 仍是写给开发者的中文，措辞不承诺稳定。
+
 〔决策〕**对端给的文本进 `Message` 之前先清一遍**：控制字符（`ESC`、`CR`、`BEL`…）、`DEL`、C1 控制码与双向文本控制符
 一律换成 `?`，并截到固定长度。版本标识串、`DISCONNECT` 的描述、拒绝开通道的理由、SFTP 的状态消息、
 代理的应答都来自对端，很多时候来自一个还没被认证的对端 —— 而 `Message` 最后会被打到终端或界面上，
@@ -50,12 +54,12 @@ SshException                          抽象基类；带 Reason / Phase / IsRetr
 ├── SshAuthenticationException        认证失败 —— 带逐方法尝试记录
 ├── SshProtocolException              对端违反协议
 ├── SshConnectionClosedException      连接已断（对端关闭 / 保活判死 / 收到 DISCONNECT / 本端中止 / 重协商时换了主机密钥）
-├── SshChannelException               通道打不开，或通道上的请求被拒 —— 带原因码与对端原文
+├── SshChannelException               通道打不开，或通道上的请求被拒 —— 带原因码、种类与对端原文
 ├── SshCommandFailedException         远端命令没有成功结束（EnsureSuccess）—— 带完整结果
 ├── SshForwardException               转发器起不来
 ├── SshPublicKeyException             公钥 blob / 文本解析失败、类型不支持
-├── SshPrivateKeyException            私钥文件读不出来、解不开 —— 带 NeedsPassphrase
-├── SshCertificateException           证书读不出来，或与私钥不是一对
+├── SshPrivateKeyException            私钥文件读不出来、解不开 —— 带 NeedsPassphrase 与种类
+├── SshCertificateException           证书读不出来，或与私钥不是一对 —— 带种类与两把公钥
 ├── SshAgentException                 连不上 agent，或 agent 拒绝了
 ├── SftpException                     SFTP 操作失败 —— 带 StatusCode 与服务端原文 ServerMessage
 ├── SftpTransferInterruptedException  传输中断 —— **带 DurableLength**
@@ -82,6 +86,11 @@ SshException                          抽象基类；带 Reason / Phase / IsRetr
 | `SshChannelException` | `ChannelOpenFailed`（带 `OpenFailureReason`）、`ChannelRequestRejected`、`LimitExceeded`（本端的通道数 / 会话窗口总预算到了上限）、`ProtocolError`（对端宣告的 max packet 是 0，写进 stdin 的发不出去） | `Open` |
 | `SshForwardException` | `ForwardRejected`、`ForwardBindFailed`、`ForwardSetupFailed`、`LimitExceeded`、`ProtocolError`；agent 转发因本机 agent 连不上而没开成时沿用 agent 那边的 `AgentNotRunning` / `AgentUnavailable` | `Open` |
 | `SftpTransferInterruptedException` | 随中断的原因（内层异常）：断线 `ClosedByPeer`；服务端拒写（磁盘满、配额、权限）照内层 `SftpException` 的原因码；调用方取消、本端释放 `Aborted`；关闭时等确认超时 `Timeout`。〔决策〕曾经固定为 `ClosedByPeer`，按原因码判断的调用方会把「磁盘满」当成断线、照样去续传 | `Open` |
+
+比 `Reason` 更细的种类（§一）：`SshPrivateKeyException` / `SshCertificateException` 带 `ProblemKind`（`SshKeyProblemKind`，两者共用）、
+`Origin`（文件路径、`Parse` 的 origin 或密钥库里的钥名，由入口在异常离开库之前补上）与 `AlgorithmName`，证书另有 `KeyId`、
+`CertificateKey`、`SignerKey`（配错时两边的公钥，界面据此显示指纹）；「文件坏了」的几十种细分合并成 `Malformed`，细节留在内层消息里。
+`SshChannelException` 带 `FailureKind`（`SshChannelFailureKind`）与 `ChannelType` / `SubsystemName` / `Limit`，种类见 [05 §2.3](05-connection.md)。
 
 读私钥、读证书、解析公钥发生在连接之外（也可能根本没有连接），所以 `Phase` 是 `None`。
 密钥交换里解析对端的主机密钥失败时，由密钥交换把它包成 `Reason` 为 `HostKeyRejected` 的 `SshConnectException`。
@@ -293,6 +302,8 @@ IReadOnlyList<AuthAttempt> Attempts      // 见 04-authentication.md §3.4
 IReadOnlyList<string>      ServerOffered // 服务端最后给出的可用方法
 bool                       PartialSuccessAchieved
 ```
+
+每条尝试记录带 `Details`（种类加参数，见 [04 §3.4](04-authentication.md)），界面按它用自己的语言写逐条说明，不解析 `Detail`。
 
 `AuthAttempt.Outcome` 里的 `SkippedNotOffered` / `SkippedNoMaterial` 是关键：
 没有它们，「私钥文件读不出来」和「服务端不接受公钥认证」在 UI 上是同一句

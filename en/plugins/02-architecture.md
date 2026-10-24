@@ -138,12 +138,23 @@ See [03-plugin-model.md](03-plugin-model.md) and [04-plugin-host.md](04-plugin-h
   data/<pluginId>/                    -> plugin-private data directory (root of the storage capability)
   permissions.json                    -> persisted authorization decisions (see 06)
   registry-cache/                     -> plugin-source index cache (see 10)
-  logs/<pluginId>/                    -> plugin-process stdout/stderr and structured logs
+
+~/.velashell/logs/plugins/
+  <pluginId>.log / <pluginId>.1.log   -> one log per plugin (rotated once at 1 MB, see §6)
 ```
+
+(Note 2026-10-24: the blueprint originally drew the logs under `~/.velashell/plugins/logs/<pluginId>/`; they actually live in the host's
+log directory, in a `plugins/` subdirectory of the same `logs/` that holds the host's own `velashell-*.log`.)
 
 ## 6. Cross-Cutting Concerns
 
-- **Logging**: PluginHost stdout/stderr is redirected to disk. The SDK provides the `vela.Log` structured logging channel, and the plugin management page can view the tail of each plugin's logs.
+- **Logging** (landed 2026-10-24): one file per plugin, `~/.velashell/logs/plugins/<pluginId>.log`, rotated at 1 MB into `<pluginId>.1.log`
+  with only that one old copy kept; one timestamp per line, with the continuation lines of exception stack traces kept intact. Every source is
+  on the host side: what the plugin writes through `context.Log` (`IPluginLogger`; called directly in-process, relayed over RPC from isolated
+  processes), the isolated process's stdout / stderr, and the activation / activation-failure / crash entries the host records for the plugin;
+  the copy in the host log stays as before. A plugin's `Trace.WriteLine` does not reach this file (in an isolated process it is not collected anywhere). The file is deleted with the plugin's
+  data on uninstall; diagnostic bundles still take only the host logs, not this subdirectory. "View log" on each row of the plugin management
+  page shows the tail (256 KB by default, updated by Refresh; no live follow).
 - **i18n**: Contribution-point text uses indirect `%key%` addressing, and `plugin.nls.<locale>.json` provides translations. The host resolves the text using the current language before rendering, and language-switch events are pushed to active plugins.
 - **Telemetry**: None (consistent with the current main application); local crash-count statistics are reserved for backoff decisions.
 - **Upgrade compatibility**: When the host is upgraded, it revalidates all installed plugins against the manifest `engines` range. Incompatible plugins are marked disabled and a notice is shown rather than failing silently.
