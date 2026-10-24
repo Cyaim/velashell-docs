@@ -34,7 +34,7 @@ Priority: **P0 = rendering pipeline + lifecycle decoupling + IME + scrolling** (
 | VT parsing/emulation/screen buffer/scrollback history | ✅ Complete (not a wrapper) | `Terminal/Emulation/{VtParser,TerminalEmulator,TerminalScreen}.cs` |
 | Custom-rendered terminal control | ✅ Usable, but has **structural performance and scrolling problems** | `Terminal/Rendering/VelaTerminalControl.cs` |
 | SSH connection + shell I/O (async) | ✅ | `Infrastructure/Ssh/*`, `Terminal/SshTerminalBridge.cs` |
-| Password / private-key authentication | ✅ | `Infrastructure/DependencyInjection/*` |
+| Password / private-key / certificate / Agent / Tailscale SSH authentication | ✅ Certificate = OpenSSH user certificate + its matching private key (2026-09-10) | `Infrastructure/Ssh/SshConnectionAssembler.cs` |
 | Split panes / tab docking (VelaDock, floating windows disabled by product decision) | ✅ | `App/Docking/*` (Model + Controls), `App/Controls/ReparentingHost.cs` |
 | dark/light/system themes (token dictionary) | ✅ Scaffolding exists, but **real-time system following and runtime accent-color overrides are missing** | `Core/Services/ThemeService.cs`, `App/App.axaml(.cs)`, `Controls/Themes/*` |
 | i18n (five languages: en default + zh-Hans/zh-Hant/ja/ko satellite resources, 938 keys fully covered, real-time switching) | ✅ Completed on 2026-07-12: all UI copy extracted across the repository (~900 locations), axaml uses `{loc:Localize}`, C# uses `Strings.Get/Format`; key-set parity and fallback-chain tests provide coverage | `Core/Resources/Strings*.resx`, `Core/Localization/*`, `App/Localization/LocalizeExtension.cs` |

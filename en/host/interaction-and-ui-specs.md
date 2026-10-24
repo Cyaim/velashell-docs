@@ -1068,6 +1068,31 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       version implements but has not enabled, the message names them and points here (“Allow legacy algorithms” or the
       custom lists); when there are none, it says plainly that enabling more will not help (typically an old device
       that only speaks CBC).
+  - **Authentication method “Certificate”** (`AuthMethod.Certificate=2`, an OpenSSH user certificate): no separate form —
+    it is key authentication plus one more field, “Certificate File”. The signature always comes from the private key;
+    the certificate is only the CA's endorsement, so the private-key and passphrase fields are used as before. The
+    certificate field sits **above** the private-key field, because the key can be derived from the certificate but not
+    the other way round.
+    - **Picking a certificate fills in the key**: after a certificate is chosen with the certificate field's “Browse...”,
+      if the private-key field is still empty, the key path is derived by ssh-keygen's naming convention — strip the
+      trailing `-cert.pub` (case-insensitive) — and filled in only if that file actually exists. If the key field
+      already has something, the name does not follow the convention, or the derived file does not exist, nothing
+      happens and the user picks the key. Only a certificate chosen through the file picker triggers this; a typed path
+      does not. The login dialog (§13.2) and the shared-credential editor follow the same rule. Without it the user
+      browses the same directory twice and can easily pick the neighbouring, non-matching key, which at connect time
+      only yields a vague “publickey” rejection.
+    - **Leaving either field empty is a hard error**: key authentication allows an empty key field; certificate
+      authentication does not. An empty certificate field shows “Certificate file is required” below it (there is no
+      default location to fall back to); an empty key field shows “Certificate authentication also needs the matching
+      private key”; a path whose file is missing shows “Certificate file not found” / “Private key file not found”.
+      These are field hints and do not block saving. On connect, a missing file first brings up the credential
+      dialog (§13.2) to collect both; the connection service then checks again and reports the two cases separately —
+      “Certificate authentication requires a certificate file.” and “Certificate authentication requires the private
+      key matching the certificate.” — so the user knows which one to supply.
+    - Two things are checked on the spot at connect time: that it is a user certificate (a host certificate, signed by
+      ssh-keygen with `-h`, cannot log in), and that the public key in the certificate pairs with the private key. A
+      mismatch reports both sides' type and SHA256 fingerprint instead of leaving the server to answer a Permission
+      denied that cannot be told apart from “CA not trusted” or “principal mismatch”.
   - **Authentication method “Agent”** (`AuthMethod.Agent=3`; the enum is persisted by ordinal, so new values can only be appended): signs with the keys in the local ssh-agent and **stores no
     credentials** in the profile; selecting it collapses the password and key fields, leaving one muted line saying
     where the agent comes from. On Windows that is the named pipe of the “OpenSSH Authentication Agent” service;
@@ -1118,7 +1143,7 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
 ### 13.2 Password Verification Dialog (Two Steps)
 
 - **Step 1 (`oNZIM`, window 520 DIP)**: username input, target and known-host fingerprint; `Cancel` / `Next`.
-- **Step 2 (`twD13`)**: full-width Password / Certificate / Key / Tailscale SSH segments and their material; `Previous` / `Login`. UI indexes are explicitly mapped to the enum. Tailscale requires only a username and never requests secrets, remembers a password or updates a shared credential. FTP and plugin protocols accept only a password, so the segments are hidden and the step shows the password field directly (the other segments mean nothing to them; picking one would only change this attempt's method and clear the password, so an empty password would be sent). OTP and host-key decisions are separate interactions.
+- **Step 2 (`twD13`)**: full-width Password / Certificate / Key / Tailscale SSH segments and their material; `Previous` / `Login`. UI indexes are explicitly mapped to the enum. Tailscale requires only a username and never requests secrets, remembers a password or updates a shared credential. The Certificate segment enables `Login` only once both the certificate and the private key are filled in, and picking a certificate fills in the key by `-cert.pub` the same way (§13.1, “Authentication method “Certificate””). FTP and plugin protocols accept only a password, so the segments are hidden and the step shows the password field directly (the other segments mean nothing to them; picking one would only change this attempt's method and clear the password, so an empty password would be sent). OTP and host-key decisions are separate interactions.
 - **One-time code dialog (keyboard-interactive, since 2026-09-29, `KeyboardInteractivePromptDialog`)**: shown when a
   two-step verification server that only allows keyboard-interactive (PAM + TOTP, Duo, bastion MFA) asks for a code.
   - **When it appears**: a single non-echoed prompt that looks like a password prompt (the word "password" in English,
