@@ -32,6 +32,7 @@ Architecture, design specs and research for the VelaShell main application.
 | [s3-protocol-plugin-design.md](s3-protocol-plugin-design.md) | Design of the S3 object-storage plugin |
 | [s3-protocol-full-support-implementation-report-2026-08.md](s3-protocol-full-support-implementation-report-2026-08.md) | Implementation log for full S3 support |
 | [system-keychain-and-sudo-credential-fill-feasibility-research.md](system-keychain-and-sudo-credential-fill-feasibility-research.md) | Feasibility of the three platforms' system keychains and sudo autofill |
+| [credential-manager-integration-design.md](credential-manager-integration-design.md) | Password-manager integration (1Password / Bitwarden / KeePassXC / system keychain): the `ICredentialProvider` contract, wiring, unlock cache, CLI hardening and phasing; its first source, the built-in shared credentials, shipped with #550 (see §0.1) |
 
 ## Engineering logs
 
@@ -39,14 +40,6 @@ Architecture, design specs and research for the VelaShell main application.
 | --- | --- |
 | [performance-and-memory-optimization-2026-07.md](performance-and-memory-optimization-2026-07.md) | Performance and memory optimisation log |
 | [terminal-input-ordering-analysis.md](terminal-input-ordering-analysis.md) | Serialising terminal input |
-
-## Chinese-only
-
-One document has no English translation yet:
-
-| Document | Contents |
-| --- | --- |
-| [凭据管理器集成设计.md](../../zh/host/凭据管理器集成设计.md) | Password-manager integration (1Password / Bitwarden / KeePassXC / system keychain): the `ICredentialProvider` contract, wiring, unlock cache, CLI hardening and phasing; its first source, the built-in shared credentials, shipped with #550 (see §0.1) |
 
 ## Kept in the code repository
 
