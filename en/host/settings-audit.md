@@ -70,7 +70,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | R-02 | P1 | Update channel | Disabled, unimplemented | Hide | Stable and preview update sources are supported | ✅ Hidden (the entire "Updates" group was removed; the About page's "Check for updates" was also changed to honestly say "The update service is not yet connected" instead of pretending that the application is up to date) |
 | R-03 | P1 | Download updates automatically | Disabled, unimplemented | Hide | Automatic download and installation flow is complete | ✅ Hidden |
 | R-04 | P1 | Master password protection | Disabled, unimplemented | Hide | Key derivation, unlocking, and credential migration are fully implemented | ✅ Hidden (a comment explains that current credentials are encrypted with a local machine key) |
-| R-05 | P2 | Tab bar position | Disabled, Dock fixed at top | Hide | The Dock template truly supports switching between top and bottom | ✅ Hidden |
+| R-05 | P2 | Tab bar position | ~~Disabled, Dock fixed at top~~ Implemented: the docking layer can put horizontal tab strips at the bottom of the pane | Show again | The Dock template truly supports switching between top and bottom | ✅ **Shown again (2026-10-24, fifteenth batch)**: Appearance → Window, between "Sidebar position" and "Show Tabs in Multiple Rows"; it governs horizontal tab strips only, and every pane changes together. Before, the docking layer could only put tabs at the top and `TabBarPosition` had no consumer |
 | R-06 | P1 | Load keys into Agent automatically | ~~Disabled, unimplemented~~ Implemented: after a successful private-key-file or certificate authentication, the key (together with the certificate for certificate authentication) is added to the local ssh-agent (like OpenSSH `AddKeysToAgent`) | Show again | `KeyOptions.AddKeysToAgent` now has a runtime consumer | ✅ Returned to the UI (2026-09-23, "SSH Agent" section of the Key Management page). The field was renamed from `AutoLoadToAgent` to `AddKeysToAgent` and is **off by default**: the old field defaulted to `true` but never had a consumer, so the `true` in existing configurations is not user consent. Since 2026-10-06 certificate authentication adds too ("certificate + private key"); when the OpenSSH agent service is not running it goes through the current user's Pageant (the SSH library's default endpoint, `ssh/spec/07-forwarding.md` §7.2) |
 | R-07 | P1 | Resume automatically | Disabled, duplicates interrupted transfer resume | Remove current UI | Return as a single setting after interrupted transfer resume is implemented | ✅ Returned as planned as the single "Resume interrupted transfers" setting (2026-07-23, see M-02) |
 | R-08 | P1 | Enable interrupted transfer resume | Disabled, duplicates automatic resume | Remove current UI | Return as a single setting after interrupted transfer resume is implemented | ✅ Returned as planned as the single "Resume interrupted transfers" setting (2026-07-23, see M-02) |
@@ -158,7 +158,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | General | Data Management | Import settings, export settings, clear recent connections, restore defaults | Restore defaults must require confirmation; export scope must be accurate |
 | General | Application Updates | Check for updates at startup, update channel, download automatically | Hide the whole group until the feature is implemented |
 | Appearance | Application Theme | Theme mode, theme color (`AccentColor`, factory empty = follow theme), interface font, interface font size | Keep real-time preview; "Follow theme" sits in front of the swatches; any other color comes from the color picker (interaction-and-ui-specs §14.3) |
-| Appearance | Window and Layout | Window opacity, show menu bar, sidebar position, show tabs in multiple rows (`Appearance.MultiRowTabs`, off by default), splash screen (`Appearance.SplashStyle`, Classic out of the box; Windows only) | Hide tab bar position until implemented; multiple rows is the same value as the check item of the same name in the tab right-click menu; the splash screen dropdown has a live preview under it and takes effect on the next launch (thirteenth batch) |
+| Appearance | Window and Layout | Window opacity, show menu bar, sidebar position, tab bar position (`Appearance.TabBarPosition`, top out of the box), show tabs in multiple rows (`Appearance.MultiRowTabs`, off by default), splash screen (`Appearance.SplashStyle`, Classic out of the box; Windows only) | Tab bar position governs horizontal tab strips only and changes every pane together; it previews immediately and cancelling rolls it back; panes moved left / right from the tab right-click menu are unaffected and land on the side chosen here when they go back to horizontal (fifteenth batch); multiple rows is the same value as the check item of the same name in the tab right-click menu; the splash screen dropdown has a live preview under it and takes effect on the next launch (thirteenth batch) |
 | Terminal | Font and Display | Terminal font, font size, line height, padding, scrollback buffer, semantic highlighting | Semantic highlighting can be placed in an advanced collapsed section. Scrollback lines (`ScrollbackLines`, default 10000, adjustable 100–200000; out-of-range values in the settings file are clamped back on load): saving applies it to every open tab; **lowering it takes effect at once** — the history beyond the new limit is trimmed immediately and cannot be recovered (a scroll position inside the trimmed part is pulled back into range, and folds and the selection are cleared), so an idle tab with no further output gives the memory back right away; raising it only widens the limit and does not bring trimmed lines back. **It applies to the main screen only**: the alternate screen of full-screen programs (vim, less, htop) never has scrollback, and changing the value while a full-screen program runs still changes the main screen |
 | Terminal | Colors | Color scheme, foreground color, background color, cursor color, selection color, ANSI palette | Collapse the ANSI palette by default; if it cannot be edited, label it as a preview |
 | Terminal | Cursor | Cursor style, blink, blink accessibility settings | Support reduced motion |
@@ -224,7 +224,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 - [x] Delete duplicate resume-transfer UI
 - [x] Hide unimplemented transfer retry and cleanup settings
 - [x] Hide unimplemented session recording and redaction settings (later, on 2026-07-12: recording was implemented and shown again, see R-11)
-- [x] Hide unsupported tab bar position
+- [x] Hide unsupported tab bar position (later, on 2026-10-24: shown again once the docking layer supported the bottom, see the fifteenth batch)
 
 ### Phase 4: Adjust the Information Architecture
 
@@ -294,7 +294,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 - Terminal page: added the "Bell and Tab Alerts" group, with the three-state "Terminal bell behavior", and removed "Visual flash".
 - Transfer page: removed the three unimplemented UI items for resume, retry, and cleanup; bandwidth and transfer log subordinate items are shown conditionally; log retention days was renamed.
 - Security Audit page: session recording and input redaction are hidden, and the alert sound was renamed.
-- Appearance page: tab bar position hidden. Key page: Agent toggle hidden.
+- Appearance page: tab bar position hidden (since restored, see the fifteenth batch). Key page: Agent toggle hidden.
 - Shortcuts page renamed "Shortcut reference" and rebuilt from actual bindings; `MainWindow.axaml` gained the actual `Ctrl+N` binding; the About page's "Check for updates" was changed to an honest status message.
 
 **Verification**: `dotnet build` passed for the full solution; 601 tests passed. The only failure, `ConPty_SpawnsShell_HandshakesAndSignalsEof`, also fails on the unchanged working tree (environment-related and unrelated to this batch).
@@ -444,8 +444,8 @@ interaction in [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §4B.3
 - **Two entry points, one value**: any tab's right-click menu has a check item of the same name, and toggling it writes this
   setting back; saving the settings page flows back into the tab strip the same way. Nothing is saved again when the value
   flowing back is unchanged, so the two sides never bounce writes off each other.
-- One switch for the whole workspace, so every pane changes together; it only applies to tab strips at the top, and the menu
-  item is disabled when the strip is docked left or right.
+- One switch for the whole workspace, so every pane changes together; it only applies to horizontal tab strips (top or bottom;
+  the bottom is in the fifteenth batch), and the menu item is disabled when the strip is docked left or right.
 - The row label and the menu item use the same localization key (`Dock_MultiRowTabs`), so the two always say the same thing.
 
 ### 2026-09-29 Ninth batch (accent follows the theme + audit log viewing and retention)
@@ -589,3 +589,23 @@ or `env | grep TOKEN` land on disk verbatim. A masking stage (`SessionOutputMask
 - **What is masked** (case-insensitive, erring on the side of masking): in `name=value` / `name: value` (JSON and YAML forms included; `grep --color` color sequences between the name and the separator do not get in the way) where the name contains password / passwd / passphrase / secret / token / api key / access key / private key / credential, only the value; the credential after `Bearer` / `Basic`; the body of PEM private key blocks (the BEGIN / END lines stay); tokens with a recognizable prefix (AWS `AKIA…` / `ASIA…`, GitHub `ghp_…` and friends, Slack `xox?-…`, `sk-…`). All become `***`. The current directory in `PWD=` is not a secret.
 - **Bytes and lines**: every byte maps to one Latin-1 character before matching; rules and replacements are ASCII, so UTF-8 and GBK round-trip unchanged. Only complete lines are matched; the trailing incomplete line is held back only when it stops in the middle of a value (or inside a private key block), up to 4 KB, while `Password: ` prompts waiting for input and full-screen programs that never print a newline pass through immediately. Whatever is held is masked and released when recording stops.
 - Not done: user-defined rules (meant to share a rule table with "custom highlight rules for terminal output", see `feature-plan.md`); bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
+
+### 2026-10-24 Fifteenth batch (tab bar position shown again)
+
+R-05 was withdrawn because the docking layer could only put horizontal tab strips at the top of a pane, so `TabBarPosition` was stored but
+never read. Now that the docking layer supports the bottom, it is back under Appearance → Window, between "Sidebar position" and "Show Tabs in
+Multiple Rows". Interaction: [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §4B.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Tab bar position | Top | Top / Bottom (`Appearance.TabBarPosition`: `top` / `bottom`) | Bottom: the horizontal tab strip and its 1px divider go below the content area; tabs look the same and the active accent line stays on the tab's top edge (which, at the bottom, is the side facing the content). Only `bottom` counts; any other value means top |
+
+- **One value for the whole workspace**, like "Show tabs in multiple rows": every pane changes together (`DockWorkspace.TabsAtBottom` in the
+  docking layer).
+- **Horizontal strips only**: docking a pane's tabs left / right from the tab right-click menu ("Tab Position") is a per-pane choice this
+  setting does not rewrite; when such a pane goes back to horizontal it lands on the side chosen here, and the menu's horizontal item reads
+  "Top" or "Bottom" to match. The dropdown's two options share their text with those menu items.
+- **Previews immediately**: changing the dropdown moves the strips in the main window right away (through the appearance preview), and
+  cancelling the settings rolls it back with the preview; at startup it is applied before the main window's first frame. "Show tabs in multiple
+  rows" still takes effect on save.
+- "Show tabs in multiple rows" works on bottom horizontal strips too (see the eighth batch).
