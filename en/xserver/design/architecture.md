@@ -352,7 +352,11 @@ extra (the slack is not charged).
     the even dashes; DoubleDash draws the odd ones in the background — sourced per fill-style: Solid uses the background colour,
     Stippled the background colour masked by the stipple, Tiled / OpaqueStippled the same source as the even dashes. A wide arc that is
     not a full circle gets caps at both ends per cap-style, and its inner and outer boundaries are ellipses with the semi-axes plus / minus
-    half the line width, not rounded. An arc whose bounding box has zero width or height is a line segment; the protocol leaves the outline
+    half the line width, not rounded. When a circle's radius is less than half the line width, the inner boundary passes through the centre
+    to the opposite side (for circles the protocol asks for the ideal boundary: the points lw/2 from the path along the normal), and a stretch
+    of the ring is drawn as the union of two sectors on either side of the centre (outer radius r + lw/2 over the stretch's own angle; on the
+    far side radius lw/2 − r, turned half a circle); for ellipses with unequal width and height the protocol leaves it to the implementation,
+    and the inner boundary still stops at 0. An arc whose bounding box has zero width or height is a line segment; the protocol leaves the outline
     to the implementation only when both are nonzero, so here it is the ideal one, the two lines half the line width from the path: each
     monotonic stretch is drawn the full line width, and where the path turns back between its ends (at ±90° for zero width, at 0° / 180° for
     zero height) the outline goes half a turn around that end of the segment, adding a disc one line width across. PolyLine with three or more points whose first and last coincide is drawn as a closed path (a join
@@ -604,7 +608,7 @@ extra (the slack is not charged).
   resize edges and corners …) reach the host as a shape without an image — the system cursor follows the desktop's theme and scaling —, the rest
   (pencil, gumby, dotbox …) hand the host the image; XFIXES GetCursorImage always returns the baked image. Modern toolkits do not use core fonts
   (they use RENDER with client-side rasterization), so core fonts only need to cover older programs.
-- **RENDER composites in integers on 8888, a8 and a1 targets**: pixels are always premultiplied. Onto a8r8g8b8 / x8r8g8b8 / a8 / a1
+- **RENDER composites in integers on 8888, a8, a1 and low-depth targets**: pixels are always premultiplied. Onto a8r8g8b8 / x8r8g8b8 / a8 / a1
   targets, all 53 operators (Porter-Duff, Disjoint / Conjoint, the PDF blend modes, with or without component alpha) first fetch the
   source and the mask each as a row of 8-bit premultiplied pixels — gradients, transforms, repeat and every source format are handled
   while sampling (solid colours, 8888 and a8 are just rearranged, bilinear filtering uses 0–256 fixed-point weights, gradient colours
@@ -619,8 +623,14 @@ extra (the slack is not charged).
   for ≥ 0.5. With 8-bit pixel sources the result is at most 1 away from per-pixel floating-point compositing, and a1 is bit for bit
   identical (checked exhaustively); bilinear and gradient sources are quantized to 8 bits first, at most 2 away from all-floating-point.
   Of these, solid source + one-byte mask + Over (Xft text, cairo's anti-aliased shapes) and 8888 image Src / Over (image blits,
-  window-to-window copies) skip row sampling and work directly on the stored pixels. Other target formats such as r5g6b5, x1r5g5b5 and
-  a4 composite per pixel in floating point (0–1 per channel). When the source or mask is the
+  window-to-window copies) skip row sampling and work directly on the stored pixels. r5g6b5, x1r5g5b5 and a4 targets first widen the
+  row to x8r8g8b8 / a8 (each channel v × 255 / (2ⁿ − 1), rounded, from a table), composite as above, and narrow back to the original depth
+  by v × (2ⁿ − 1) / 255, rounded — at most one step of the target format away from per-pixel floating point: Porter-Duff, Disjoint and
+  Conjoint only multiply the destination colour by a factor no greater than 1, so the under-half-step error (in 8 bits) of widening does not
+  grow, and the destination alpha is either always 1 (the two rgb formats have no alpha) or widens to an exact integer (× 17 for 4 bits).
+  The PDF blend modes on r5g6b5 / x1r5g5b5 still composite per pixel in floating point (0–1 per channel): colour dodge / burn and the HSL
+  modes have unbounded slopes in the destination colour, which would magnify that half step into several steps of the target format; a4
+  computes alpha only and still goes through integers. When the source or mask is the
   target's own buffer, the part to be read is copied out first (the result must be as if the source were read before any write): the area that
   will actually be written is mapped back to source coordinates, using the bounding box of the transformed corners when there is a transform,
   and folded back per repeat — the whole picture is not copied. Alpha-only glyphs are stored one byte per pixel; one CompositeGlyphs request
@@ -1418,7 +1428,7 @@ extra (the slack is not charged).
   ⑤ **RENDER's integer paths cover every operator on a1 / a8 / 8888 targets**: at most 1 away from per-pixel floating-point compositing, a1 bit
   for bit identical (checked exhaustively), the combinations that used floating point about 2–12 times faster. Along the way a NaN in the floating-point
   ClipColor was fixed (a grey source in the four HSL modes on a target with αd = 0 came out with colour 0). r5g6b5, x1r5g5b5 and a4 targets
-  are rare and still use floating point.
+  are rare and still use floating point (integers too since 2026-10-24, see "Geometry left from the review and low-depth RENDER").
   ⑥ Selections isolated per session (other sessions see no owner changes and get no SelectionClear for them), alpha maps on source pictures
   and the single-buffered visual for indirect GLX were done in the same round (§7).
   ⑦ **Still left**: closing an X popup menu when the user clicks a local window or the desktop (needs a global pointer hook); new features
@@ -1548,3 +1558,27 @@ extra (the slack is not charged).
   ④ **RANDR reports the real refresh rate**: the host never filled in `XMonitor.RefreshRate`, so 60 was always reported and GTK, Qt and browsers drew only 60 frames per second
   even on high-refresh displays; on Windows the host now reads the current display mode's refresh rate through the monitor handle (macOS / Linux still report 60).
   The server library itself did not change.
+- **Geometry left from the review and low-depth RENDER (2026-10-24)**: the partially done items still open after the second review are closed, except
+  the one that needs a global pointer hook; the behavior is written into §7.
+  ① **Wide arcs on circles whose radius is less than half the line width: the inner boundary reaches the far side.** The inner boundary used to
+  take the semi-axes "minus half the line width, no less than 0", stopping at the centre and leaving the far-side part undrawn. For an arc whose
+  bounding box has equal width and height and whose radius is greater than 0 but less than half the line width, a stretch of the ring is drawn
+  as the shape swept by the normal segments — one sector on each side of the centre (outer radius r + lw/2 over the stretch's angle; far side
+  radius lw/2 − r, turned half a circle), each a simple polygon, put into the same active edge table and filled as a union. The outline formed
+  by the outer boundary and the two end faces self-intersects (the end faces cross at the centre), and beyond half a turn the two sectors also
+  overlap, so it cannot be filled as one polygon by even-odd; the protocol names no fill rule, and the union matches both the intuition of "a
+  pen lw wide moving along the path" and the definition of wide lines. The outer sector's edges are exactly the old ring edges, so no
+  previously drawn pixel is lost; Projecting caps and the inner corners of joins follow to the far side. Full circles are unaffected (the outer
+  boundary already encloses the whole circle), and ellipses are unchanged. 400 random circles / line widths / angles (including spans beyond
+  half a turn) were compared pixel by pixel against the union of the two sectors.
+  ② **Wide arcs whose bounding box has zero width or height**: already changed on 2026-10-10 (item ① of that round's wrap-up); this round only
+  checked it, and the existing pixel tests stay green.
+  ③ **Integer compositing on low-depth targets**: only 8888 / a8 / a1 targets used integers, while r5g6b5, x1r5g5b5 and a4 decoded, composited
+  and encoded per pixel in floating point; now they widen to 8 bits, composite and narrow back (the RENDER item in §7), at most one step away
+  from per-pixel floating point channel by channel (three targets × 53 operators × 4 sources × 3 masks), with the blend modes on the two rgb
+  formats bit for bit identical. The benchmark `scripts/xserver/bench/bench.cs` gained three scenarios, each measured twice before and after
+  (the machine was running other builds at the same time, so the numbers jitter a lot): Composite ARGB → r5g6b5 100×100 Over, per second,
+  2370 / 3117 → 17199 / 26151; ARGB + a8 mask → r5g6b5 Over 2645 / 1102 → 11292 / 19055; a8 → a4 100×100 Add 2283 / 2795 → 21285 / 30235; CPU
+  time about 2300 ms → 400–600 ms. The slowest run after the change is still 4.3–7.6 times faster than the fastest run before it.
+  ④ **Still open**: closing an X popup menu when a local window or the desktop is clicked (WN-M7) needs a global pointer hook, written once per
+  platform.
