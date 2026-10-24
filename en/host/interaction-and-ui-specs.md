@@ -111,8 +111,15 @@ From top to bottom:
      (natural order: "Rack 2" before "Rack 10"; the current locale's collation, so Chinese sorts by pinyin), and the order can
      still be adjusted by hand afterwards.
 2. **Session resource tree (`fill_container`, scrollable)**: collapsible group list occupying most of the sidebar.
+   - **Filter box** (since 2026-10-24): pinned above the tree and not scrolled with it (one in the expanded sidebar and one in the collapsed rail's flyout, bound to the same text), placeholder “Filter by name, host, tag or note”.
+     - Filters by name / host / tag / note / the name of the containing group: the text is split on whitespace, **every word must match**, and different words may match different fields; case-insensitive, contiguous substrings. The username is not used (typing `root` would keep almost everything). Typing a group name lays out the whole group.
+     - Groups with a match expand automatically, groups without one are hidden entirely; pinned connections still come first, and those without a match are hidden too. When nothing matches, the tree area reads “No connections match the filter.”.
+     - Expansion is temporary: expanding / collapsing while filtering is not written to the expansion memory, and clearing the filter (Esc in the box, or the × at its right end) returns every group to how it was before filtering. When exactly one connection is left, Enter connects it.
+     - A selection that gets filtered out is cleared (the context menu must not act on another row), and “follow the active terminal tab” does not select hidden rows; groups cannot be dragged while filtering (the insertion line can only be drawn between visible rows, so the drop target would lie).
+     - Filtering only changes the display: the group menu (open all / export / delete) still acts on the whole group; to act on the filtered results, multi-select with Shift / Ctrl (ranges already follow the visible rows).
    - Group row: collapsible triangle + group name, such as “Production” or “Testing”, + count.
    - Host row: status dot (green/yellow/red) + hostname + optional label, such as “jump host” on an `accent-dim` background.
+     - A connection that picked a tab icon (§13.1 “Organize”) shows the same 12px icon between the status dot and the name (colored like the name, accent when selected); rows without one draw nothing and keep no space for it.
      - **The dot is the merge of every live session under that profile**, not whatever changed state last. One profile
        can have several terminal tabs and several documents open at once (standalone SFTP / FTP / plugin file systems
        such as S3 / workbenches such as Redis) while the tree has a single node for it: the merge priority is
@@ -600,6 +607,7 @@ Save the current split panes and tabs as a named template and reopen the same se
 ### 6.1 Multi-Terminal Sync Input Channel (replaces the original Broadcast Input Bar)
 
 - Entry is in the tab context menu under “Sync Input”: four fixed channels A/B/C/D, distinguished by color (pink/blue/orange/green), plus “Leave All Channels”.
+- A whole group or a multi-selection can also be opened from the explorer with synced input (since 2026-10-24): the new terminal tabs join the first free channel together; see §12 for the rules.
 - Peer model: any user input in a channel (keyboard/IME/paste) is copied in real time to the other tabs in that channel. Switching to any tab in the channel preserves the same shared input behavior. Each tab can belong to only one channel at a time.
 - Tabs in a channel show the channel letter (A/B/C/D, in the channel color) before the status dot in the tab header. A channel bar appears above the terminal: color swatch + “Input synchronized in channel X” + [Pause] [Leave Channel] [Close Channel].
   - **Pause**: this tab temporarily stops sending and receiving channel input; click again to resume.
@@ -739,6 +747,7 @@ for work the host cannot see.
 - Move between results with `↑/↓` or `Ctrl+P/N`, execute the highlighted item with `Enter`, complete with `Tab`, and close with `Esc`.
 - `Enter` on a session item connects and activates its tab. `Enter` on a command item executes the corresponding function, equivalent to clicking its entry point.
 - Support recently used ordering and fuzzy scoring, with matched characters highlighted for subsequence matches.
+- Besides the title, session items also match their tags → host → notes (since 2026-10-24; these keywords are neither shown nor highlighted): keywords only match contiguous substrings, a keyword starting with the query ranks above one containing it further in, tags outrank the host and the host outranks notes; overall such hits rank after contiguous-substring hits on the title and before subsequence hits on the title. An entry under “Recent connections” that matches a saved profile carries the same keywords.
 
 ---
 
@@ -892,6 +901,15 @@ Right-click a session row in the sidebar to open it (200px, `bg-surface`, corner
 - Open N connections (`plug`, accent primary action) — started in tree order from top to bottom with at most 6 handshakes at a
   time, so the tabs appear one after another; above 10 it asks first ("This will open N connections at once"). A failure only
   shows in its own tab
+- Open N Connections with Synced Input (`link-2`, since 2026-10-24) — opens only what yields a terminal (SSH and plugin
+  terminal protocols; SFTP / FTP / workspaces are skipped), always as new tabs, and puts them into the first free synced
+  input channel (A → D, §6.1; free = no tab in it and not reserved by another batch that is still opening); when all four
+  channels are in use it opens nothing and asks you to close one first. Tabs of the same profiles that are already open are
+  left alone and not pulled into the channel (one may be sitting in vim, or be in another channel). Concurrency and
+  confirmation are the same as "Open N connections". Each one joins the channel as soon as it finishes (connected, or failed
+  with its overlay kept), so one that reconnects later is still in the channel; at the end one toast says "N terminals joined
+  synced input channel X", with a clause each for any that did not connect and any non-terminals skipped, and then at warning
+  level
 - Open in dual-pane SFTP (`arrow-right-left`, §6.2) — only with exactly two; if one of them cannot go into the dual pane the item
   is disabled, with a line below explaining why
 - Divider
@@ -908,6 +926,8 @@ Right-clicking a row outside the selection opens the menu above as usual and end
 
 - Open all connections (`plug`, accent primary action) — same concurrency and confirmation as "Open N connections"; nothing
   happens on an empty group
+- Open All with Synced Input (`link-2`) — same rules as "Open N Connections with Synced Input" in the multi-select menu,
+  applied to the whole group
 - Divider
 - Move up / Move down (`arrow-up` / `arrow-down`) — disabled at the top / bottom
 - Divider
@@ -1018,8 +1038,17 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
     - **Switching back to “Enter in this connection”** copies the credential's username (if the form's is empty), method and
       password / key into the form instead of leaving a row of empty boxes.
   - **Plugin protocol fields**: headed “&lt;protocol&gt; settings”; only fields without `IsAdvanced` are drawn here.
-  - **Organize**: display name / session group / tags side by side, with a full-width **Notes** row below
-    (#549, `SessionProfile.Notes`).
+  - **Organize**: display name / session group / tags side by side, a **tab icon** on the second row, and a full-width
+    **Notes** row below (#549, `SessionProfile.Notes`).
+    - **Tab icon** (since 2026-10-24, `TerminalOverrides.TabIcon`, stores a lucide glyph name): pick one of 23 icons the way
+      you pick a color (server, database, cloud, globe, terminal, shield, key… — the names say what is drawn, not what it
+      means). The field looks like the color picker's (§14.3): icon + name + drop-down arrow; the flyout is a grid of icon
+      cells, the current one with a bold border and an accent icon, and “Follow protocol” at the bottom clears it.
+      No choice = follow the protocol, and the field shows that protocol's default icon one step dimmer. Every connection
+      type has it (the Terminal page, where the color lives, exists only for SSH, while the icon is drawn for SFTP / FTP /
+      plugin tabs too). Tabs and the explorer both draw it (§4B.2, §3); tabs already open keep their icon (like the tab
+      color, it is read once when the tab is created), while the explorer updates as soon as the profile is saved.
+      It travels with JSON import / export and cloud sync, not with CSV (neither does the tab color).
     - A multi-line text box: Enter starts a new line (the dialog has no default button, so Enter never saves by
       accident), Tab still moves to the next control; at most about five lines tall, longer text scrolls inside the
       box instead of stretching the page.
@@ -1053,7 +1082,7 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       handshake, and the callback re-checks identity by session id + connection status — within those seconds the tab
       may have disconnected, been closed, or reconnected as a different session.
   - **Session-level terminal items on the Terminal page (SSH only)**: encoding, terminal type, color scheme, tab
-    color (color picker, see §14.3; no color = automatic, with a one-click reset at the bottom of the flyout), startup directory, keep-alive interval, and **anti-idle (s)**. There can only be one global setting, but
+    color (color picker, see §14.3; no color = automatic, with a one-click reset at the bottom of the flyout; the tab icon is not here but under General → Organize), startup directory, keep-alive interval, and **anti-idle (s)**. There can only be one global setting, but
     machines are not alike — the bastion host speaks GBK while the dev box speaks UTF-8, and production tabs should be
     red at a glance. Those differences follow the machine; folded into one global switch they become an either/or.
     Every item except anti-idle means “empty / `-1` = follow the global setting”.
@@ -1455,13 +1484,22 @@ and the user is asked what to fill in before it is sent. Commands that differ by
 - **The dialog**: one row per variable (name + input pre-filled with the default, read out by the variable name), with
   a live “Will send:” preview of the whole command below; the first input has focus, Enter sends, Esc cancels. Cancel
   sends nothing at all.
+  - Each input is pre-filled with the value last entered for that quick command (since 2026-10-24; remembered per quick
+    command + placeholder name, falling back to the default when nothing was remembered). It lives only in the current
+    run: never written to disk, never in cloud sync or import / export; placeholders whose names look like credentials
+    (containing pass / pwd / secret / token / otp / credential / apikey, or 密码 / 口令 / 密钥 / 令牌 / 验证码 and the like) are not
+    remembered even for the run; an input left empty is not remembered, so next time it is back to the default.
 - **Line breaks in a value become spaces**: a quick command sends its text without Enter, so a line break inside a
   value would press Enter for the user.
 - Target tabs may disconnect while the dialog is open: targets are picked again from the current tabs when sending,
   and only those still connected receive it.
 - In Settings → Snippets, the new / edit area has a one-line syntax hint under the command input.
-- When terminal command completion offers a quick command as a candidate, it still inserts the raw text with
-  placeholders — completion continues what has already been typed, and substituted text would no longer match it.
+- Picking a quick command with placeholders in terminal command completion (Enter / click in the panel, or accepting such
+  ghost text with Right / End; since 2026-10-24) first opens the same dialog, and after confirmation writes the
+  substituted command into the command line by completion's usual continuation rule (only the rest when it shares the
+  typed prefix, otherwise erase and rewrite); on cancel, a dialog error, the tab disconnecting while the dialog is open, or
+  the command line changing, not a single byte is written. A history entry identical to that quick command asks as well.
+  Before this, the raw text with placeholders was inserted.
 
 ### 14.3 Color picker (2026-10-01)
 
