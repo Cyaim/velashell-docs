@@ -509,7 +509,7 @@ Reason: the repository is the **single exit** for every save. The direct saves l
 
 | Trigger | Mode | When the vault is locked |
 |---|---|---|
-| User-initiated connections: session tree, command palette, recent connections, "Connect" / "Test" in the profile dialog, clone tab, opening SFTP / FTP / plugin documents, external launch, restoring sessions at startup | **Interactive** | Show the unlock dialog |
+| User-initiated connections: session tree, command palette, recent connections, "Connect" / "Test" in the profile dialog, clone tab, opening SFTP / FTP / plugin documents, external launch, restoring sessions at startup, opening a layout template (it goes through the same connection flows) | **Interactive** | Show the unlock dialog |
 | Manual reconnect: Ctrl+R, Enter, the "Reconnect" button on the bubble (`:872`, `:1246/2259`, `:2782`) | **Interactive** | Show the unlock dialog |
 | Automatic reconnect: the `OnTabDisconnected` timer (`:2812-2832`), `ReconnectAllAfterResume` (`:2694-2713`), tunnel `AutoReconnectAsync` | **Non-interactive** | Throw `Locked`; the tab shows the failure overlay with the text "The vault is locked. Press Ctrl+R to reconnect" |
 | Connection diagnostics | Interactive (opened by the user) | Show the unlock dialog |

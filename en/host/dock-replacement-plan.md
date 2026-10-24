@@ -11,7 +11,8 @@
 ## 1. Current-State Analysis: Actual Use of Dock.Avalonia
 
 After a repository-wide audit, Dock's integration surface is **highly concentrated**, and only a small portion of its capabilities is used
-(a single document area, with no floating windows, tool panels, Pin, or layout serialization):
+(a single document area, with no floating windows, tool panels, Pin, or layout serialization; layout serialization was added later with
+layout templates, outside the model layer — see the 2026-10-24 note in §2.1):
 
 ### 1.1 Code Integration Points
 
@@ -68,6 +69,13 @@ After a repository-wide audit, Dock's integration surface is **highly concentrat
 
 - **Build only what is used**: document-style tab groups + binary/multi-way split tree + dragging. No floating windows, Pin,
   tool panels, or layout serialization (unused; extension points are sufficient).
+  (Note 2026-10-24: layout serialization arrived with named layout templates and "Restore split layout", but outside the model layer —
+  `Docking/DockLayoutSnapshot` captures the workspace as a Core `LayoutTemplate` tree (`Core/Layouts`), or builds an empty split skeleton
+  from one; what a document is and how to reopen it is handed in by the host as a delegate, so the model stays pure INPC and knows nothing
+  about templates. The model layer gained only three things for it: `DockWorkspace.PlacementResolver` (an external say on where a new
+  document lands; null falls back to the default rule in §2.3), `InsertLayout` (inserts a whole subtree: on an empty workspace it becomes
+  the whole layout, otherwise it goes into a column on the right) and the `DocumentReplaced` event (moves the bookkeeping over when a
+  placeholder is replaced in place by the real document).)
 - **Separate model and visuals**: pure `INotifyPropertyChanged` models (unit-testable, with no Avalonia dependency);
   the control layer renders from the model. Introduce no new framework and do not depend on ReactiveUI (existing use in the App layer continues).
 - **View retention built in**: the workspace control internally maintains a `document → view` cache, naturally replacing

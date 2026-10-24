@@ -152,7 +152,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 
 | Top-level group | Second-level group | Settings | Display rule |
 |---|---|---|---|
-| General | Startup and Window | Start automatically at system boot, restore last session, startup window state, minimize to tray when closing the window, confirm before exiting the application | The "Exit confirmation" description should explain tray behavior |
+| General | Startup and Window | Start automatically at system boot, restore last session, restore split layout (`General.RestoreLayoutOnStartup`, off by default), startup window state, minimize to tray when closing the window, confirm before exiting the application | The "Exit confirmation" description should explain tray behavior; restore split layout is subordinate to restore sessions and disabled while that is off (sixteenth batch) |
 | General | Language | Interface language (`Language`, empty by default = follow the system: English when the system language is not one of the five UI languages; a language chosen in Settings takes precedence) | The settings page must be localized in sync; the first dropdown item is "Follow system" |
 | General | Behavior | Follow the active terminal tab (`General.FollowActiveTerminalInExplorer`), collapse groups on startup (`General.CollapseGroupsByDefault`, off by default) | The collapse option only decides the initial state **the first time a group is seen in this run**; manual expand/collapse is remembered in-process and a full tree rebuild does not fold it back |
 | General | Data Management | Import settings, export settings, clear recent connections, restore defaults | Restore defaults must require confirmation; export scope must be accurate |
@@ -609,3 +609,28 @@ Multiple Rows". Interaction: [interaction-and-ui-specs.md](interaction-and-ui-sp
   cancelling the settings rolls it back with the preview; at startup it is applied before the main window's first frame. "Show tabs in multiple
   rows" still takes effect on save.
 - "Show tabs in multiple rows" works on bottom horizontal strips too (see the eighth batch).
+
+### 2026-10-24 Sixteenth batch (restore split layout)
+
+"Restore sessions" (`General.RestoreSessionsOnStartup`, long-standing and on by default) reconnects the connections that were online at the
+last exit one by one into a single pane, without the splits. The layout serialization behind named layout templates lets it restore the last
+split layout too, as a subordinate option. Interaction: the layout templates section and §14 of
+[interaction-and-ui-specs.md](interaction-and-ui-specs.md).
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Restore split layout | Off | On / Off (`General.RestoreLayoutOnStartup`) | Under General → Startup & Window, right after "Restore sessions", and disabled while that is off. When on, the panes' orientation and proportions, each pane's tab order, the selected tabs and the pinned state come back too |
+
+- **Consumers**: `MainWindow.RestoreSessionsAsync` — when on and a layout was recorded, it reconnects and arranges by that layout (through the
+  same restorer as layout templates, at most 6 handshakes at once, like opening a whole group); with no recorded layout it falls back to
+  reconnecting `LastOpenProfileIds` one by one. `MainWindow.PersistWindowBounds` (on exit) — when on it records a layout as well; when off it
+  clears the old one, so that turning the option back on some day, followed by an unclean exit, does not restore a layout from long ago.
+  `LastOpenProfileIds` is written as before.
+- **What is recorded**: only the tabs online at exit, the same rule as `LastOpenProfileIds`, plus local terminals and dual-remote file tabs.
+  The exit path does not query the store; whatever no longer matches at the next start (usually temporary profiles that were never saved, such
+  as quick connections) is skipped silently.
+- **Not in the settings file**: the exit layout lives in the SonnetDB `layout_session` collection (one `last` document), named layout
+  templates in the `layout_templates` collection, one document per template; neither travels with settings export or cloud sync, and neither
+  holds passwords.
+- It defaults to off so that the existing default behavior of "Restore sessions" does not change; that option itself is untouched and still on
+  by default.
