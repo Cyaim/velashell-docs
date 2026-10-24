@@ -770,6 +770,63 @@ for work the host cannot see.
 
 ---
 
+## 11A. Plugin Manager Window (opened from `plug` at the bottom of the sidebar)
+
+**Trigger**: `plug` in the sidebar's bottom user bar (§3); “Get more protocols…” at the bottom of the new-connection dialog's protocol rail (§13.1). A modeless standalone window owned by the main window; **only one is ever open** — triggering it again just brings the open one to the front.
+
+**Window**: 676×556 by default, minimum 516×396, centered on its owner; resizable from all four edges and corners, with the per-platform frame (see §2). On close it records its normal-state size and position (the `pluginManager` entry of `windowLayout` in the document store) and opens there next time.
+
+**Structure, from top to bottom**:
+- **Title bar (28px, bottom divider)**: left = `plug` (accent) + “Plugin Manager”; right = minimize / maximize / close. Double-clicking the title bar toggles maximize; dragging it moves the window.
+- **Toolbar (bottom divider, 14×10 padding)**:
+  - **Security notice** (first row; `VelaBgInput` fill with a border, 5 radius, a warning-colored `shield` on the left, 10pt `text-secondary`, wrapping): “Plugins run with your account permissions and can reach your files, sessions and network. Before installing, confirm where the package came from and check its signature fingerprint…”. It sits **before** the Install button: the signature dialogs only appear for unsigned packages or unknown publishers, by which time the user has already picked the file — the risk has to be visible before the button is pressed.
+  - Second row, left: a button group (outlined, 28 high, 4 radius, 11pt): `download` “Install .vpx…”, `refresh-cw` “Check for updates”, “Update all”; middle: a one-line notice (`text-muted` 10pt, ellipsized) where the outcome of installing / checking / updating and “Plugin host for "X" is waiting for a debugger — attach to process N.” appear; right: a “Plugin store ↗” link (`text-tertiary`, accent with underline on hover, tooltip “Browse reviewed plugins at market.easilynet.top”, opened in the system browser).
+  - Visibility: the security notice and Install appear only when there is a writable user plugin directory; Check for updates additionally needs a marketplace client; Update all appears only when at least one row can be updated directly.
+- **List** (scrollable, 14×12 padding, with 6 more on the right so the overlay scrollbar does not cover the buttons when it expands): sorted by display name (case-insensitive); with no plugins it shows the empty state (30px `plug` + “No plugins installed.”). It refreshes by itself whenever the plugin runtime changes (install, uninstall, enable/disable, crash).
+
+**List row** (card: `VelaBgInput` fill, border, 6 radius, 14×11 padding, 8 between rows):
+- **Left: status dot** (8px): green = active (`VelaStatusConnected`); yellow = restarting (the isolated process exited unexpectedly and waits for its backoff restart); red = failed / invalid / incompatible; grey = everything else (idle, disabled, deactivated).
+- **Middle, top to bottom**:
+  1. Display name (12pt Medium) + version `v1.2.3` (monospace 10pt `text-muted`) + a host-mode chip (`InProcess` / `Isolated`, monospace 9pt); plugins mounted for development (`plugins.dev.txt` / `VELA_PLUGIN_DEV_ROOT`) also get a warning-colored `DEV` chip.
+  2. Status text (10pt `text-secondary`) + plugin id (monospace 9pt) + “by X” (the manifest's `author`, falling back to `publisher`; hidden when both are missing). An active plugin with no open panel / document / protocol session reads “Running in background” — an in-process plugin stays resident once activated, so closing its tab does not stop it.
+  3. **Publisher fingerprint** “publisher SHA256:…” (monospace 9pt `text-muted`): the signer's public-key fingerprint pinned at install time (publisher continuity; see step 4 of “Installing” below). The manifest's `author` is a line the plugin writes about itself, which anyone can write; this line is the cryptographic identity. It is **truncated only on screen** (one line, ellipsized), with the full fingerprint in the tooltip — a shortened fingerprint cannot be checked, yet looks as if it could. Built-in plugins, side-loaded ones (installed from the command line or dropped into the directory) and plugins installed from an unsigned package have no pinned identity, and the line is hidden rather than showing “unknown”.
+  4. Error / reason (red, wrapping, only when present).
+  5. **“Host too old” notice** (warning color, wrapping): “Version X is available, but it needs a newer VelaShell (Y).” Y is whatever is missing — `apiLevel N`, `VelaShell x.y.z` or `SDK x.y.z` — and the tooltip says the same. In this case there is **a notice but no update button**: a button that is bound to fail is worse than none.
+- **Right: row actions** (outlined, 26 high, 4 radius, left to right; an action whose condition is not met does not appear at all):
+
+| Button | Shown when | What it does |
+| --- | --- | --- |
+| View log | The manifest is valid (an invalid plugin never ran; the reason is already in its error line) | Opens this plugin's log window, see below |
+| Revoke permissions | It holds a `terminal.write` / `session.open` grant (always or for this session), or an active upload / download lease; rechecked every 500 ms while the window is open and whenever it is activated | Revokes them at once and cancels pending and running upload / download leases; no confirmation |
+| Reload | Mounted for development, manifest valid, and not invalid / incompatible / disabled | Deactivate → reread the manifest → load again, so a rebuild runs without restarting VelaShell |
+| Update to x.y.z | The store has a newer version that this host can install, and the user installed the plugin | See “Updating” below |
+| Enable / Disable | The manifest is valid and the plugin is not invalid / incompatible | Takes effect at once |
+| Uninstall | The user installed it (built-in plugins are read-only and cannot be uninstalled) | Danger style; asks “Uninstall "X"? Its data will be removed.” first, then deletes the directory and its KV, secrets, time-series data and log |
+
+**Checking for updates**:
+- Opening the window asks the store once; the Check for updates button is there to retry after an offline attempt. **Only the ids of plugins the user installed leave the machine** (the store has no built-in or development-mounted plugins); the plugin manager makes no other outbound requests.
+- The notice goes “Checking for plugin updates…” → “All plugins are up to date.” or “N plugin(s) have a newer version.” (plugins the host is too old for count towards N too).
+- Versions are compared the way the app's own updater compares them (prerelease suffixes count: with `1.2.0-beta.1` installed, `1.2.0` in the store is newer). Built-in, development-mounted and plugins the store does not know have no “update”.
+
+**Updating / Update all**: the row's “Update to x.y.z” first downloads that version to a temporary directory (notice “Updating “X”…”, or “Update failed: reason”), then checks whether the publisher fingerprint the store reports matches the one pinned on this machine. If it matches, it installs directly (that key is the one the user accepted in the first place); if it does not match, the version is unsigned, or nothing was ever pinned here, it goes through the full install confirmation below. “Update all” does the same for every row that can be updated directly at that moment. An update replaces files only; the plugin's KV, secrets and time-series data are kept.
+
+**Installing a `.vpx`** (“Install .vpx…” picks a file; updates go through here too) may show these danger-style dialogs, in this order:
+1. **Unreadable trust store** (“Plugin trust store is unreadable”, usually because `~/.velashell/secret.key` changed): explains the cause and the cost; “Reset trust store” creates an empty store (the unreadable one is kept as a backup), trusted publishers have to be trusted again and installed plugins lose their tamper-evident receipts. Without a reset nothing can be installed.
+2. **Unsigned** (“Untrusted plugin package”): “"X" is not signed. Plugins can execute code with your account permissions. Install only if you trust its source.” → “Install anyway” allows it once.
+3. **Valid signature, unknown publisher** (same title): shows the public-key fingerprint and asks the user to verify it through the author's official channel → “Trust publisher and install”. This “trust” is written into the local trust store **only after the install succeeds**: the package may be taking over an installed plugin's identity, and that question can only be asked once the id has been read out of the package; a failure to write it is reported but does not roll the install back.
+4. **Publisher changed** (“Plugin publisher changed”): a plugin with the same id is installed and the signer pinned back then does not match this package (or this package is unsigned, shown as “(this package is not signed at all)”). The dialog shows both full fingerprints side by side and states that “a routine key rotation and a hijacked publishing identity look exactly the same from here” → only “Install anyway” replaces it, pinning the new key as the new baseline. When refused, the installed version is left untouched (the check runs before the old version is removed). This only protects plugins installed from the plugin manager: side-loaded plugins cannot pin a publisher, and the host has no way to stop an impersonating overwrite of them (see [Developer Guide §12.2](../templates/dev-guide.md#122-signing)).
+- The outcome goes to the toolbar notice: “Installed "X".” / “Install failed: reason”.
+
+**Plugin log window** (the row's “View log”, since 2026-10-24):
+- A modeless standalone window owned by the plugin manager (closed together with it); **at most one per plugin** — clicking the same row again brings it to the front and refreshes it. 820×560 by default, minimum 520×320; size and position are remembered like the other tool windows, one entry shared by all plugins (`pluginLog`).
+- **Title bar**: `file-text` + “Plugin log · display name”; an action group with `refresh-cw` Refresh (disabled while reading) and `folder-open` Open containing folder (the log directory `logs/plugins/`, created first if it does not exist yet); then minimize / maximize / close.
+- **Subtitle line**: the log file's path (monospace, full text in the tooltip); when only the tail was read it reads “Last 256 KB only · path”.
+- **Body**: a monospace, read-only, non-wrapping text box; after opening and after every refresh the caret goes to the last line. There is no live follow mode; reproduce the problem, then click Refresh.
+- **Empty state** (`file-text` icon + text): “This plugin hasn't logged anything yet. What it writes through its logger, the standard output and error of its isolated process, and its activation, failures and crashes all end up here. Click refresh after reproducing the problem.” When the plugin id cannot be used as a file name, it points to the lines starting with `[Plugin:<id>]` in the application log instead.
+- **Log file**: `<data root>/logs/plugins/<plugin id>.log` (by default `~/.velashell/logs/plugins/`), rotated to `<id>.1.log` at 1 MB (only that one old file is kept), so at most about 2 MB per plugin. The window reads the last 256 KB, topping up from the rotated file when the current one is shorter, and drops the line cut in the middle. Every source is on the host side: what the plugin writes through `IPluginLogger` (called directly in process, relayed over RPC from an isolated process), the isolated process's stdout / stderr (where unhandled-exception stacks land), and what the host records for it — activation, activation failure (with the full exception) and crashes; the copy in the host's own log stays. It is deleted when the plugin is uninstalled; the diagnostic bundle does not include this subdirectory.
+
+---
+
 ## 12. Session Context Menu (`e6klM`)
 
 Right-click a session row in the sidebar to open it (200px, `bg-surface`, corner radius 6, vertical `padding:4`). Items use an icon + text, `bg-hover` on hover, and red text for dangerous actions:
