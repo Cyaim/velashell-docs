@@ -36,7 +36,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | C-05 | P1 | Scrollback line count | Inconsistent default value | The settings model defaults to 50000, while `SettingsViewModel` defaults to 10000 | Keep only one source for the default value; preferably provide it through `AppSettings` or a default configuration factory | `AppSettings.cs:19`;`SettingsViewModel.cs:114` | ✅ Done: the VM initial value now comes from `new AppSettings()` and no longer declares its own business default |
 | C-06 | P1 | Default language | Inconsistent default value | The settings model uses `zh-CN`, while the ViewModel uses `en` | Unify the source of the default value | `AppSettings.cs:8`;`SettingsViewModel.cs:90` | ✅ Done: as with C-05, the VM initial value now comes from the settings model |
 | C-07 | P1 | Cursor style | Inconsistent default value | The settings model uses `bar`, while the terminal control internally defaults to `block` | Apply the default from the settings model in the terminal control instead of declaring a business default independently | `AppSettings.cs:218`;`VelaTerminalControl.cs:145` | ✅ Done: the control default now matches the model (`bar`), with a comment explaining that the runtime value is supplied by `ApplyLiveTerminalSettings` |
-| C-08 | P1 | Settings import/export | Description and scope are inconsistent | The text promises to back up "all connections and settings", but `BuildExportJson()` serializes only `AppSettings` | In the short term, revise the description; in the long term, explicitly support selective export of connections, groups, known hosts, snippets, and other data | `SettingsViewModel.cs:474-482`;`GeneralSettingsPage.axaml:106-107` | ✅ Done (short term): renamed "Settings import/export"; description changed to "Back up or migrate application settings only; connections, groups, keys, and snippets are not included"; selective export remains a future enhancement |
+| C-08 | P1 | Settings import/export | Description and scope are inconsistent | The text promises to back up "all connections and settings", but `BuildExportJson()` serializes only `AppSettings` | In the short term, revise the description; in the long term, explicitly support selective export of connections, groups, known hosts, snippets, and other data | `SettingsViewModel.cs:474-482`;`GeneralSettingsPage.axaml:106-107` | ✅ Done (short term): renamed "Settings import/export"; description changed to "Back up or migrate application settings only; connections, groups, keys, and snippets are not included". ✅ Selective export done (2026-10-24, seventeenth batch): export / import by category with checkboxes, sensitive categories unticked by default, and the proxy password and webhook URL never written. Connections, groups and the like are still outside the settings export; they have connection-file export ([session-import.md](session-import.md) §7) |
 | C-09 | P1 | Interface language | Incomplete localization | Much of the settings page text is hardcoded in Chinese, so the Settings Center may remain partly Chinese after switching to English | Move settings titles, labels, descriptions, and options to `.resx` | Approximately 148 Chinese text instances in `Views/Settings/*.axaml` | ⏳ Pending: the localization infrastructure is already available (`LocalizeExtension` + `Strings.resx/zh-CN.resx`), but migrating and translating approximately 150 strings is a large focused effort. It should be handled as a separate batch to avoid mixing it with this structural remediation |
 | C-10 | P1 | Shortcut reference | Display may not match actual bindings | The page uses a separately maintained hardcoded table, and "New connection Ctrl+N" appears twice | Generate the page from the actual shortcut registry; until then, rename it to "Shortcut reference" | `SettingsViewModel.cs:318-355`, especially `:322,336` | ✅ Finished 2026-10-03 (joesdu/VelaShell#551): the global and tab bindings were consolidated into one factory table, `ShortcutBindings`; the main window generates its KeyBindings from it under the current keymap (nothing is hardcoded in `MainWindow.axaml` any more, and a test enforces that), and the shortcuts page and the command palette hints read from it too. The remaining fixed shortcuts are still listed one by one in `ShortcutCatalog`, also test-guarded. Before that: the page was renamed "Shortcut reference"; entries were rebuilt and checked one by one against the actual bindings (`MainWindow KeyBindings`, `KeyboardShortcutService`, `TerminalTabView`, `RemoteFileEditorView`), all fabricated and duplicate entries were removed, and the actual `Ctrl+N` binding, which had been labeled but missing from the menu/command palette, was added. |
 | C-11 | P1 | Restore defaults | Destructive operation lacks confirmation | Clicking it immediately resets settings for every page | Add a confirmation dialog and consider adding "Restore defaults for current page" | `SettingsView.axaml:246`;`SettingsViewModel.cs:562-567` | ✅ Done: both Restore defaults and "Clear history" now show a dangerous-action confirmation dialog; "Restore defaults for current page" is an optional enhancement and has not been implemented |
@@ -155,7 +155,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | General | Startup and Window | Start automatically at system boot, restore last session, restore split layout (`General.RestoreLayoutOnStartup`, off by default), startup window state, minimize to tray when closing the window, confirm before exiting the application | The "Exit confirmation" description should explain tray behavior; restore split layout is subordinate to restore sessions and disabled while that is off (sixteenth batch) |
 | General | Language | Interface language (`Language`, empty by default = follow the system: English when the system language is not one of the five UI languages; a language chosen in Settings takes precedence) | The settings page must be localized in sync; the first dropdown item is "Follow system" |
 | General | Behavior | Follow the active terminal tab (`General.FollowActiveTerminalInExplorer`), collapse groups on startup (`General.CollapseGroupsByDefault`, off by default) | The collapse option only decides the initial state **the first time a group is seen in this run**; manual expand/collapse is remembered in-process and a full tree rebuild does not fold it back |
-| General | Data Management | Import settings, export settings, clear recent connections, restore defaults | Restore defaults must require confirmation; export scope must be accurate |
+| General | Data Management | Import settings, export settings, clear recent connections, restore defaults | Restore defaults must require confirmation; export scope must be accurate. Export / import by category with checkboxes, Security & Audit and Proxy unticked by default (seventeenth batch) |
 | General | Application Updates | Check for updates at startup, update channel, download automatically | Hide the whole group until the feature is implemented |
 | Appearance | Application Theme | Theme mode, theme color (`AccentColor`, factory empty = follow theme), interface font, interface font size | Keep real-time preview; "Follow theme" sits in front of the swatches; any other color comes from the color picker (interaction-and-ui-specs §14.3) |
 | Appearance | Window and Layout | Window opacity, show menu bar, sidebar position, tab bar position (`Appearance.TabBarPosition`, top out of the box), show tabs in multiple rows (`Appearance.MultiRowTabs`, off by default), splash screen (`Appearance.SplashStyle`, Classic out of the box; Windows only) | Tab bar position governs horizontal tab strips only and changes every pane together; it previews immediately and cancelling rolls it back; panes moved left / right from the tab right-click menu are unaffected and land on the side chosen here when they go back to horizontal (fifteenth batch); multiple rows is the same value as the check item of the same name in the tab right-click menu; the splash screen dropdown has a live preview under it and takes effect on the next launch (thirteenth batch) |
@@ -180,7 +180,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | Security and Privacy | Clipboard Permissions | OSC 52 write permission | Recommend Deny or Ask every time by default |
 | Security and Privacy | Credentials | Remember password, master password protection | If "Remember password" is placed on the connection page, provide only a link here and do not duplicate the control |
 | Security and Privacy | Security Alerts | In-app notifications, security alert sound, Webhook, Webhook URL | Show the URL only after Webhook is enabled |
-| Security and Privacy | Session Audit | Session recording (✅ Implemented: toggle + Replay Center entry), audit log (✅ Implemented: viewer window + retention days `Security.AuditLogRetentionDays`), input redaction (not planned, output-stream recording does not echo passwords) | Shown |
+| Security and Privacy | Session Audit | Session recording (✅ Implemented: toggle + Replay Center entry), audit log (✅ Implemented: viewer window + retention days `Security.AuditLogRetentionDays`; 2026-10-24 added profile / settings / shared-credential events, a time-range filter and CSV export, see the seventeenth batch), input redaction (not planned, output-stream recording does not echo passwords) | Shown |
 | Shortcuts | Shortcuts | Show actual bindings by command | The global and tab bindings can be changed, unbound and reset (A-08); everything else is a fixed, read-only shortcut |
 | Advanced | Monitoring and Diagnostics | Resource monitoring, refresh interval, latency probing | Collapse by default or label the additional network overhead |
 | About | Application Information | Version, runtime environment, license, configuration directory, update entry | Exclude from Restore defaults |
@@ -634,3 +634,63 @@ split layout too, as a subordinate option. Interaction: the layout templates sec
   holds passwords.
 - It defaults to off so that the existing default behavior of "Restore sessions" does not change; that option itself is untouched and still on
   by default.
+
+### 2026-10-24 Seventeenth batch (settings import / export by category, audit log completed)
+
+The "selective export" that C-08 left open. Export used to write the whole `AppSettings` (with only the proxy password blanked): the proxy's
+address and account, the alert webhook URL (a DingTalk / Feishu / WeCom / Slack bot URL is itself a token) and the external-launch trusted
+targets all went into the file; import overwrote everything, so `{}` or a wrongly picked `package.json` was taken in as an all-defaults set of
+settings. Interaction: [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §14 (General page) and §15 (audit log). No new settings.
+
+**Categories** (`Core/Models/SettingsCategories`, cut along the actual blocks of `AppSettings`, with loose root-level fields assigned to the
+page they appear on; the order follows the left navigation, with the message center right after General; a reflection test pins down that
+every root-level property belongs to exactly one category):
+
+| Category | Block | Root-level fields assigned to it | Sensitive |
+| --- | --- | --- | --- |
+| General | `general` | `language`, `defaultPort` | |
+| Message center | `notifications` | — | |
+| Appearance | `appearance` | `theme`, `accentColor` | |
+| Terminal | `terminalBehavior` | `terminalFont`, `terminalFontSize`, `scrollbackLines`, `terminalType`, `terminalEncoding` | |
+| Key Management | `keys` | — | |
+| Shortcuts | `shortcuts` | — | |
+| File Transfer | `transfer` | — | |
+| Security & Audit | `security` | — | ✅ |
+| Proxy | `proxy` | — | ✅ |
+| X Server | `xServer` | — | |
+
+- **Sensitive categories start unticked**: export and import share one checklist; Security & Audit and Proxy carry a "Sensitive" tag and are
+  unticked by default, and ticking one shows, in the warning color, what it carries (export: the proxy's address, port and user name; the
+  host-key policy, the external-launch confirmation and trusted targets, the alert switches) / what it will change (import: the proxy every
+  outbound connection uses from then on; host-key confirmation, the external-launch confirmation and its trusted targets). Import starts
+  unticked too — a file from someone else should not quietly switch off external-launch confirmation or redirect outbound traffic.
+- **Secrets are never written**: the proxy password and the alert webhook URL are left out whether or not their category is ticked. There is
+  no encrypted export: those two are the only real secrets in the settings, and moving secrets to another machine is what cloud sync's
+  end-to-end passphrase is for.
+- **Runtime state is not exported**: window size and position and the last open sessions (`lastOpenProfileIds`) are not written, and import
+  keeps the local ones; one-time migration markers do travel (without them an import would migrate values the user already chose a second time).
+- **File shape**: still the `AppSettings` JSON, keeping only the selected blocks, plus an export header `velaShellExport` (format
+  `velashell-settings`, version 2, export time, categories). It is not wrapped: an older version importing a wrapped file would reset
+  everything to defaults, whereas with this shape it only resets the categories the file does not carry.
+- **Import**: the categories a file carries are recognized by its JSON keys (an old whole-settings export = all of them); only those carried
+  and ticked are overwritten, everything else stays; fields a block leaves out take the type's defaults (as before). When the file has no proxy
+  password, the local password is kept only if the proxy's type, host, port and user name all match the local ones — a file pointing at another
+  proxy does not get it, or the local password would be handed to whoever wrote the file; the webhook URL always stays local. Values the file
+  does spell out (a webhook URL from an older export) are used. JSON in which no category is recognized is reported as "not a settings file"
+  and nothing changes. Imported values only land in the settings page and are written when "Save" is clicked.
+- Export now takes the settings page's current values (unsaved edits included); before, the grouped options carried unsaved edits while the
+  root-level fields were whatever was last loaded.
+
+**Audit log** (interaction in §15):
+
+- The session repository, the settings service and the shared-credential repository each gain an auditing decorator
+  (`Infrastructure/Audit/`), with three new event categories: `profile` (`profile-created` / `profile-updated` / `profile-deleted`),
+  `settings` (`settings-changed`) and `credential` (`credential-created` / `-updated` / `-deleted`).
+- **Only which part changed is recorded, never the values**: "settings changed" uses the same categories as above and records which ones
+  changed; runtime state and migration markers do not count, so writing the window size on exit or cloud sync pulling identical data leaves no
+  entry. Profiles record block names — name / address / login credentials / other settings; the last-connected time, directory bookmarks and
+  pinning are not changes.
+- Settings changes catch quite a few everyday actions: changing the font size with Ctrl+wheel in a terminal, switching columns or showing hidden
+  files in the file panel, ticking "Don't ask again" for an external launch each leave an entry.
+- Storage and retention are unchanged: still `audit_log`, pruned at startup by "Audit log retention days" (ninth batch). The viewer gains a
+  time-range filter and CSV export (read-only, not settings).
