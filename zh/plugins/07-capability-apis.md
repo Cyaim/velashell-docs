@@ -54,7 +54,7 @@ public interface IRemoteFs
 
 ### 2.1 独立上传任务（SDK 2.1.1）
 
-`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。登记之前就被明确拒绝的（源不存在、被占用、额度满、空间不够）以 `PluginTransferRejectedException` 交回（契约随 SDK 2.1.3 发布，宿主已接上；见 [SDK §3.3e](../sdk/sdk-reference.md#33e-传输启动前被拒sdk-213)）。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
+`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。登记之前就被明确拒绝的（源不存在、Windows 共享/锁冲突、额度满）以 `PluginTransferRejectedException` 交回（契约随 SDK 2.1.3 发布，宿主已接上；见 [SDK §3.3e](../sdk/sdk-reference.md#33e-传输启动前被拒sdk-213)）。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
 
 当前宿主每插件上传与下载合计最多 4 项实际传输并行、32 项活动/排队任务，保留最多 1024 条生命周期幂等回执；满额明确拒绝新任务，同 id 重取已有回执不受活动额度阻挡。这是资源并发预算，不是文件大小上限。
 

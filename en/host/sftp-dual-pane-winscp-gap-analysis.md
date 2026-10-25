@@ -9,6 +9,12 @@
 
 ---
 
+## Status after the 2026-10-25 merges
+
+`feat/sftp-r2b` adds local/remote directory back and forward history (50 steps per pane instance), current-directory name filtering, F5/F2/Delete, filter Esc/Enter, local empty-file creation and system-default opening on double-click, persistent remote column widths and dual-pane ratios, and “Open terminal here” for SSH file panes. These items in the older gap descriptions below are no longer pending; double-click still does not mean transfer. See [keyboard shortcuts](keyboard-shortcuts.md) for focus conditions. Plugin protocol link fields, modification times and server digests are wired as well; creating symbolic links still has no contract.
+
+The terminal entry is limited to SSH profiles. Its directory command is still built for POSIX shells; non-POSIX shells and control characters in directory names remain gaps, so this is not complete cross-shell support.
+
 ## I. Conclusion First
 
 VelaShell is currently a **quite solid one-way file transfer tool**, but it is not yet a **dual-pane file manager**.

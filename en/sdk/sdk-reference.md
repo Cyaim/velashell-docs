@@ -175,7 +175,7 @@ Actual length, remote metadata before/after transfer and available digests are c
 - `PluginTransferRejectedException` (derives from `InvalidOperationException`, deliberately not `IOException`; sealed) carries `Reason` (`RemoteTransferRejectReason`: `Unknown = 0`, `SourceNotFound`, `SourceInUse`, `QuotaExceeded`, `InsufficientSpace`). The RPC error code is `RpcErrorCodes.TransferRejected = "transfer-rejected"`, on the wire `transfer-rejected:source-in-use`; an unknown or missing suffix restores as `Unknown`; it comes before `InvalidOperationException` in `FromException`.
 - Throwing it guarantees that the job was not registered, no transferId was created, nothing was read or written, and the OperationId was not recorded in the ledger. A plugin may try again once conditions change (the same OperationId will not hit "arguments differ"), but should not retry automatically right away.
 - Keep it apart from the other two outcomes: "result unknown" can only be resolved by fetching the receipt again with the same OperationId; "user denied" (`PluginPermissionDeniedException`) is pointless to retry. Invalid arguments, unsupported platforms, missing sessions and OperationId argument conflicts keep their existing exception types. `IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` gained `<exception>` documentation.
-- The current host (not switched over yet) still throws the old types for these pre-registration refusals (for example, too little snapshot space is a `Failed` / `insufficient-space` snapshot, §3.3b).
+- In the current host, insufficient space is detected while preparing the upload source snapshot after approval; it remains a registered job's `Failed` / `insufficient-space` snapshot (§3.3b), not a pre-registration refusal. `SourceInUse` detection is limited to Windows sharing/lock violations.
 
 ### 3.4 UI and extension points
 
@@ -313,7 +313,7 @@ if (ctx.Ui.SupportsNotifications)
 
 ### 3.8 Version comparison `SemanticVersion` (SDK 2.1.3)
 
-**Officially published in SDK 2.1.3 on NuGet.org.** The host, CLI and marketplace now use SDK `SemanticVersion` where their version gates require it; it follows full SemVer precedence, while `CompareCoreTo` compares only numeric parts.
+**Officially published in SDK 2.1.3 on NuGet.org.** The host now uses `SemanticVersion` for update checks, release notes, plugin load gates, plugin updates and feed version targeting. CLI and marketplace migration must be checked separately, not inferred from the host package upgrade.
 
 - `VelaShell.PluginSdk.Versioning.SemanticVersion` (readonly struct): `Major` / `Minor` / `Patch` / `Revision` (the fourth part, 0 when absent), `PreRelease` / `BuildMetadata` (never null), `IsPreRelease`; `TryParse` / `Parse` (throws `FormatException` when invalid).
 - `CompareTo` follows the full SemVer 2.0 §11 precedence: `beta.2 < beta.10`, numeric identifiers compare by length then ordinally without overflow at any length, numeric identifiers rank below alphanumeric ones, alphanumeric ones compare in ASCII order case-sensitively, and with everything else equal more identifiers rank higher; build metadata is kept but not compared (`Equals` / `GetHashCode` agree).

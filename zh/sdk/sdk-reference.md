@@ -171,7 +171,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 - `PluginTransferRejectedException`（派生自 `InvalidOperationException`，刻意不是 `IOException`；sealed）带 `Reason`（`RemoteTransferRejectReason`：`Unknown = 0`、`SourceNotFound`、`SourceInUse`、`QuotaExceeded`、`InsufficientSpace`）。RPC 错误码 `RpcErrorCodes.TransferRejected = "transfer-rejected"`，线上格式 `transfer-rejected:source-in-use`，不认识或缺失的后缀还原成 `Unknown`；`FromException` 里排在 `InvalidOperationException` 之前。
 - 宿主抛它就等于保证：任务没有登记、没有生成 transferId、没有读写任何内容、OperationId 也没有记进账本。条件变了之后可以再试（同一个 OperationId 不会撞上「参数不符」），但不要紧接着自动重试。
 - 与另外两种结局分开处理：「结果未知」只能用同一个 OperationId 去重取回执；「用户拒绝」（`PluginPermissionDeniedException`）重试没有意义。参数非法、平台不支持、会话不在、OperationId 参数冲突照旧用原来的异常类型。`IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` 补了 `<exception>` 说明。
-- 当前宿主（尚未改抛）对这几种登记前的拒绝仍抛原来的类型（例如快照空间不够是 `Failed` / `insufficient-space` 的快照，§3.3b）。
+- 当前宿主的空间不足发生在审批后的上传源快照阶段，仍返回已登记任务的 `Failed` / `insufficient-space` 快照（§3.3b），不是登记前拒绝。`SourceInUse` 的识别限于 Windows 共享/锁冲突。
 
 ### 3.4 界面与扩展点
 
@@ -298,7 +298,7 @@ if (ctx.Ui.SupportsNotifications)
 
 ### 3.8 版本比较 `SemanticVersion`（SDK 2.1.3）
 
-**已随 SDK 2.1.3 正式发布到 NuGet.org。** 宿主、CLI 与商店已分别在需要版本闸的地方采用 SDK 的 `SemanticVersion`；它按完整 SemVer 优先级比较，`CompareCoreTo` 只比较数字段。
+**已随 SDK 2.1.3 正式发布到 NuGet.org。** 宿主已在更新检查、发布说明、插件装载版本闸、插件更新和资讯源版本定向中使用 `SemanticVersion`。CLI 与商店的迁移状态需分别核对，不由宿主的包升级推断。
 
 - `VelaShell.PluginSdk.Versioning.SemanticVersion`（readonly struct）：`Major` / `Minor` / `Patch` / `Revision`（第四段，没有时为 0）、`PreRelease` / `BuildMetadata`（永不为 null）、`IsPreRelease`；`TryParse` / `Parse`（不合法抛 `FormatException`）。
 - `CompareTo` 按完整的 SemVer 2.0 §11 优先级：`beta.2 < beta.10`，纯数字标识符按长度再按序数比、任意长度不溢出，纯数字低于含字母的，含字母的按 ASCII 序数、区分大小写，前面都相同时标识符多的更高；构建元数据保留但不参与比较（`Equals` / `GetHashCode` 同一口径）。
