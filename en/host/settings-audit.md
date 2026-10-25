@@ -167,6 +167,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | Terminal | Scrolling | Auto-scroll while output is being received, scroll to bottom on keypress | Retain as independent settings |
 | Terminal | Clipboard and Selection | Copy on select, paste on right click, trim trailing spaces, select word on double-click, copy with Ctrl+C, confirm multiline paste | Order by input/output risk |
 | Terminal | Input and Session | IME, execute command after connection | A risk warning for startup commands would be more appropriate |
+| Terminal | Output Rules (a page of its own, right after "Terminal") | The user's highlight and auto-answer rule table (`TerminalBehavior.OutputRules`) | Exported / audited with the "Terminal" category; auto-answer acts only on the prompt line the cursor is on, and rules that would match a password prompt are refused (twenty-third batch) |
 | Connection | Connection Defaults | Default port, connection timeout, heartbeat interval | Move from General |
 | Connection | Automatic Reconnect | Automatic reconnect, maximum attempts, reconnect interval | Hide subordinate settings when automatic reconnect is disabled |
 | Connection | Authentication Preferences | Remember password, default authentication key | Provide a link to Key Management |
@@ -274,6 +275,9 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | `src/VelaShell.Core/Sftp/SftpService.cs` | Consumers of bandwidth limit and timestamp settings |
 | `src/VelaShell/ViewModels/FileBrowserViewModel.cs` | Hidden files (toggle writes back to settings), completion notifications, and transfer logs |
 | `src/VelaShell.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs` | SSH timeout, heartbeat, and host fingerprint policies |
+| `src/VelaShell.Core/Models/OutputRule.cs`, `src/VelaShell.Core/OutputRules/` | Output rule model, compilation (linear-time engine) and password guard (twenty-third batch) |
+| `src/VelaShell.Terminal/Semantics/OutputTriggerScanner.cs` | Auto-answer decisions (cursor line only, no answer while typing locally, cooldown and per-minute limit) |
+| `src/VelaShell/ViewModels/OutputRulesViewModel.cs`, `src/VelaShell/Views/Settings/OutputRulesPage.axaml` | The "Output Rules" settings page |
 
 ## 14. Remediation Record
 
@@ -588,7 +592,7 @@ or `env | grep TOKEN` land on disk verbatim. A masking stage (`SessionOutputMask
 
 - **What is masked** (case-insensitive, erring on the side of masking): in `name=value` / `name: value` (JSON and YAML forms included; `grep --color` color sequences between the name and the separator do not get in the way) where the name contains password / passwd / passphrase / secret / token / api key / access key / private key / credential, only the value; the credential after `Bearer` / `Basic`; the body of PEM private key blocks (the BEGIN / END lines stay); tokens with a recognizable prefix (AWS `AKIA…` / `ASIA…`, GitHub `ghp_…` and friends, Slack `xox?-…`, `sk-…`). All become `***`. The current directory in `PWD=` is not a secret.
 - **Bytes and lines**: every byte maps to one Latin-1 character before matching; rules and replacements are ASCII, so UTF-8 and GBK round-trip unchanged. Only complete lines are matched; the trailing incomplete line is held back only when it stops in the middle of a value (or inside a private key block), up to 4 KB, while `Password: ` prompts waiting for input and full-screen programs that never print a newline pass through immediately. Whatever is held is masked and released when recording stops.
-- Not done: user-defined rules (meant to share a rule table with "custom highlight rules for terminal output", see `feature-plan.md`); bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
+- Not done: user-defined rules — the rule table now exists (the twenty-third batch, "Output Rules") but masking is not wired to it yet, see `feature-plan.md`; bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
 
 **2026-10-25 addendum** (the setting is unchanged; what is masked and how it is recognized changed):
 
@@ -824,3 +828,26 @@ The named layout templates of the sixteenth batch lived only on the local machin
   Existing sync configurations lack the field and read as on, so the first sync after upgrading pushes the existing templates (`PRIVACY.md` says so).
 - **Why a separate file**: the main payload is pushed whole, so a new section inside it would be dropped by an older client when deserializing and wiped from the cloud when it pushes back (that is how §158's `HiddenBuiltInIds` were lost); older clients only read and write the main file and never touch this one.
   Merging per template id with deletions kept as 180-day tombstones is described in §4C of the interaction specs; templates, nodes and tabs all carry `JsonExtensionData`, so fields added by newer versions round-trip unchanged.
+
+### 2026-10-25 Twenty-third batch (output rules: custom highlights and auto-answer)
+
+The built-in semantic highlighting is 7 compile-time regular expressions (`SemanticMatcher`) users cannot extend, and nothing in the code base did "output matches → send something". This batch adds one rule table shared by highlights and triggers / auto-answer, plus an "Output Rules" page in the settings window (after "Terminal", 15 pages in total). Interaction: [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §5.2, §5.2.3 and §14.6.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Output rule table | Empty | `TerminalBehavior.OutputRules`, at most 64 | The "Output Rules" page of the settings window; applies to open tabs on save (`TerminalSettingsApplier`); exported / imported and audited with the "Terminal" category, synced with app settings |
+| Rule: action | Highlight | `highlight` / `respond` | Unknown values do not take effect and are flagged on the page |
+| Rule: scope | Global | `global` / `group` / `profile` + `scopeId` | Local terminals take only global rules |
+| Rule: pattern / case sensitive / enabled | — / No / Yes | At most 512 characters, linear-time engine | Backreferences, lookarounds, atomic groups and conditionals are refused |
+| Highlight: text color / background / bold | No change / No change / No | Palette index 0–15 or empty | At least one; out-of-range indices load as "no change" |
+| Answer: text / then press Enter | Empty / Yes | At most 128 characters, one line of visible text | Empty text + Enter = just press Enter; rules that would match a password prompt are refused |
+| Answer: cooldown / per-minute limit | 2 s / 6 | 1–3600 / 1–30 | Clamped on load |
+| Answer: forward to sync channels | No | Yes / No | |
+
+- **It lives in the "Terminal" block**: fields are strings / nullable numbers (the document store's JSON has no enum converters); export / import and the audit follow the "Terminal" category and cloud sync follows app settings — it travels with the user like quick commands, with no category of its own in `SettingsCategories`.
+  `Normalize` clamps numbers, drops empty entries and truncates past 64; rules failing validation are not deleted but skipped by the compiler and flagged on the page. "Restore defaults" clears the table too.
+- **Rules sync with the settings, on the condition that the table never holds a password**: an auto-answer rule whose pattern literally mentions password-like words (password / passphrase / PIN / OTP / token / secret and their CJK equivalents), or that would match one of 15 common password prompts,
+  cannot be set to auto-answer (`OutputRuleSecretGuard`, erring on the side of refusing — patterns without keywords such as `:\s*$` or `.*` are caught too); for such a rule "Done" stays disabled in the editor, and a draft like that is dropped when the window's "Save" is clicked. Highlight rules are not restricted (marking "password" in red in a log is legitimate).
+- **Trigger rules** (`Terminal/Semantics/OutputTriggerScanner`): remote output only; only the logical line the cursor is on, main screen; no answer when there has been local input since the last Enter; wait for 300 ms of quiet; one answer per line; the cooldown postpones rather than drops, and the per-minute limit pauses for a minute;
+  not forwarded to sync input channels by default. Details in §5.2.3 of the interaction specs.
+- **Not done**: wiring recording and log masking (fourteenth batch) to this table so users can add their own masking rules — left in `feature-plan.md`; multi-step expect dialogs, variables and scoping by tab / marker are not done either.
