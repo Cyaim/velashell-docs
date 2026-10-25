@@ -121,11 +121,11 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 `RemoteUploadOptions` 只有必填非空 `OperationId`、`Overwrite`（默认否）及可空正数 `Timeout`（null 无执行死线）。无固定文件大小上限；64 位字节计数不受 32 MiB 或 `int.MaxValue` 限制，但不消除磁盘、权限、协议和网络边界。实现必须按流传输，不整体载入内存。宿主用不可预测的临时文件，校验和远端收尾成功后原子提交；无法实现所请求的原子提交/覆盖时明确失败，不能先删除目标。当前宿主的临时文件是目标同目录下的短名 `.vela-up-<16 位十六进制>`（接在目标名后面会让长文件名超出 `NAME_MAX`）。开始写之前做一次提交预检：要覆盖而服务端没有 `posix-rename`、不覆盖而目标已存在时直接失败，`ErrorCode` 分别为 `not-supported` 与 `commit-rejected`，与提交时被拒同一口径；预检查不出来不拦，之后才出现的目标照样由提交拒绝，提交仍是唯一权威。覆盖上传的临时文件一建出来就按被替换普通文件的 0777 权限位新建（服务端照常减 umask；目标是个条目却读不出模式时按 0600；读不到目标就按服务端默认，提交时照旧把关），写入期间不比原文件宽；setuid / setgid / 粘滞位与属主仍由提交补上。覆盖提交把被替换普通文件的权限位（07777）带到新文件上：属主尽力而为，setuid / setgid 只在属主属组对上之后才带；读不到目标模式，或改不了临时文件模式而它比目标宽时拒绝提交，目标原样不动（只许收窄，不许放宽）。
 
-`RemoteTransferSnapshot` 包含任务/启动标识、会话与源/目标路径、`State`、从 1 开始的单调 `Sequence`、`TransferredBytes`/`TotalBytes`（未知 -1、空文件 0）、可空速率/ETA、创建/更新/完成时间、取消意图、远端停止确认、恢复检查点及错误类别/信息。`State` 默认 `Unknown = 0`；其余状态为 `Queued`、`Starting`、`Running`、`CancelRequested`、`Succeeded`、`Failed`、`Cancelled`、`TimedOut`。字节满格时可能还在 `Running`，不能据此宣称完成；`IsSuccess` 仅对应 `Succeeded`。`Unknown`/`TimedOut` 属于本地终态，不证明远端写入停止，不得自动重传。
+`RemoteTransferSnapshot` 包含任务/启动标识、会话与源/目标路径、`State`、从 1 开始的单调 `Sequence`、`TransferredBytes`/`TotalBytes`（未知 -1、空文件 0）、可空速率/ETA、创建/更新/完成时间、取消意图、远端停止确认、恢复检查点及错误类别/信息。`State` 默认 `Unknown = 0`；其余状态为 `Queued`、`Starting`、`Running`、`CancelRequested`、`Succeeded`、`Failed`、`Cancelled`、`TimedOut`。字节满格时可能还在 `Running`，不能据此宣称完成；`IsSuccess` 仅对应 `Succeeded`。`Unknown`/`TimedOut` 属于本地终态，不证明远端写入停止，不得自动重传。当前宿主在停止（取消、到期、断线、停用）之后最多等 30 秒让后端停下，再定终态；断线记 `Failed` / `session-disconnected`（确认停写、目标未写入，重连后重试安全），与 `Cancelled` 区分；Linux / macOS 源快照所在卷空间不够时为 `Failed` / `insufficient-space`。
 
 - 启动、查询、等待、取消和恢复的令牌都只控制**本次请求**；等待到期/请求取消不停止已启动的任务，显式取消意图一经登记不因请求取消而回滚。启动回执丢失时复用同一 `OperationId`，不能另造 id 重传。
 - 任务由宿主持有、归属宿主确认的插件身份，所有访问复核授权。插件侧 AI run/对话隔离仍须另行实施，不能把插件归属当成对话隔离。插件停用、授权撤销、SSH 断线和宿主退出须收尾；无停止确认则为 `Unknown`。只保证当前应用/插件生命周期，不承诺应用重启、插件重新激活或 MCP 会话销毁后仍可恢复。
-- 当前宿主逐组件解析本地源的父目录别名（如 macOS `/var`），末级文件链接仍拒绝（Windows 上只有名字代理类重解析点 —— 符号链接、目录联接、挂载点 —— 算链接，OneDrive 云文件占位符这类过滤器标记不算）；打开后用平台句柄路径核验实际对象，审批与快照显示解析后的路径。幂等回执保留原请求路径，别名后来改向或源路径消失时，同 OperationId 重取不会重新打开文件。路径检查与快照校验不等于对恶意并发写入的原子文件系统快照保证。
+- 当前宿主逐组件解析本地源的父目录别名（如 macOS `/var`），末级文件链接仍拒绝（Windows 上只有名字代理类重解析点 —— 符号链接、目录联接、挂载点 —— 算链接，OneDrive 云文件占位符这类过滤器标记不算）；打开后按文件身份（Windows 卷序列号 + 文件 id，Unix dev + inode）核验实际对象，核验那一端不经链接走到；映射盘、subst、硬链接名、大小写 / 规范化变体视为同一文件；审批与快照显示解析后的路径。幂等回执保留原请求路径，别名后来改向或源路径消失时，同 OperationId 重取不会重新打开文件。路径检查与快照校验不等于对恶意并发写入的原子文件系统快照保证。
 - 首次审批绑定规范化源/目标路径、实际源对象和覆盖策略；宿主检查本地读取与远端写入权限，排队开始前及整个传输期间保持源稳定，防止路径替换、符号链接与并发写入改变已批准内容，无法保证即失败。`Overwrite=false` 必须使用原子无替换提交，不能只在上传前检查存在性。
 - 启动/恢复的 `OperationId` 共用插件生命周期命名空间，记录请求种类和全部参数；操作串行化，先复核授权与去重记录再检查状态，重复请求返回当前快照但不执行。回执/墓碑保留整个生命周期，额度满拒绝新增，不遗忘 id 后重执行；参数冲突抛 `InvalidOperationException`，不存在或不属于本插件的 id 统一抛 `FileNotFoundException`。
 - 快照增加 `Generation`（从 1 开始，每次恢复加一）及 `DestinationCommitConfirmedAbsent`（默认 false）。`CanResume` 还要求确认最终目标未提交；提交回执丢失未消歧时绝不可恢复。重新验证源对象、临时文件归属和检查点；重连通过明确的 `TargetSessionId` 选择连接，宿主核对服务器密钥身份、账户和文件命名空间，仅地址相同不足以恢复。恢复保持 `transferId` 和递增 `Sequence`，清除取消意图与完成时刻，不满足条件拒绝而不从头重传。
@@ -133,7 +133,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 - RPC 新增 `fs/transfer/startUpload|get|wait|cancel|resume|progress`，载荷为 `FsTransferStartUploadRequest`、`FsTransferRef`、`FsTransferWaitRequest`、`FsTransferCancelRequest`、`FsTransferResumeRequest`、`FsTransferProgressNotification`。握手的 `SupportsTransferOperations` 默认 false，旧宿主不能被推断为支持。`progress` 携带快照，按 `TransferId + Sequence` 丢弃旧帧；至少 100ms 节流，状态变化及时发送，通知丢失用 get/wait 补读，通知不具备 exec 专用严格发送保证。
 - `FakeRemoteFs` 显式配置能力开关和 start/get/wait/cancel/resume 的 Handler，记录独立请求，转发参数及请求令牌；没有 Handler 就明确不支持，不退回现有整文件内存上传。幂等、权限及真正的任务执行由宿主实现，测试脚本须显式模拟，不由替身伪造成功。
 
-当前宿主在新上传 API 中通过独立单任务租约实施可信确认：读取内容前展示插件、真实会话、本地源、远端路径和覆盖策略，只批准当前任务，不继承终端/开会话许可；AI `Bypass` 不影响宿主确认。缺少授权闸、提示器或桌面窗口时拒绝。插件管理页撤销同步使待批准及活动租约失效并请求取消，提交前重验，查询/后续进度不再泄漏被撤销的元数据；不承诺回滚已经提交的文件。这不扩展到旧同步文件 API，也不代表通用权限 Broker 已完成。
+当前宿主在新上传 API 中通过独立单任务租约实施可信确认：读取内容前展示插件、真实会话、本地源、**文件大小**、远端路径和覆盖策略，只批准当前任务，不继承终端/开会话许可；AI `Bypass` 不影响宿主确认。缺少授权闸、提示器或桌面窗口时拒绝。插件管理页撤销同步使待批准及活动租约失效并请求取消，提交前重验，查询/后续进度不再泄漏被撤销的元数据；不承诺回滚已经提交的文件。这不扩展到旧同步文件 API，也不代表通用权限 Broker 已完成。
 
 此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主与 AI 的接线使用独立任务提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。当前宿主连接边界不能证明重连后的服务器密钥、账户与远端命名空间一致，因此 `ResumeTransferAsync` 明确报不支持、`CanResume=false`；接口存在不代表恢复已实现，`Unknown` 不自动重传。
 
