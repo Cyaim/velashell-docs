@@ -395,6 +395,10 @@ event EventHandler<ForwardErrorEventArgs>      Error;              // a single c
 
 `ForwardErrorEventArgs.Reason` is the enum `ForwardErrorReason` (`Accept` / `ConnectionLimit` / `SocksHandshake` / `ChannelOpen` /
 `TargetConnect` / `Relay` / `SetupSkipped` / `TargetNotPermitted`; the zero value is `Unknown`), not a string —— callers branch on it instead of having to recognize an agreed-upon piece of text.
+〔Decision〕**The kinds that carry no `Exception` still have parameters to talk about**: `Target` (where this connection was going; a local forward to a socket no longer gets a Chinese prefix there, `Message` is unchanged),
+`Timeout` (only the time-out kinds: a SOCKS handshake time-out, a tunnel not opened within `ChannelOpenTimeout`), `Limit` and `RejectedCount` (the limit and how many were turned away meanwhile when the concurrency limit is hit),
+and a target outside the allow list (`TargetNotPermitted`) also carries `Target`. Callers can say "the tunnel did not open within N seconds" or "the limit of N was reached and M connections were refused meanwhile" in their own language,
+instead of getting "Reason: <Chinese text>".
 
 Also published through `System.Diagnostics.Metrics`:
 
@@ -545,6 +549,11 @@ The window is only a credit, not memory allocated up front; ordinary messages ar
 the agent protocol has no request ids, so the request may be only half written and the reply may still be on its way; every later call fails with `AgentUnavailable` and the caller reconnects
 (a client connected by `ConnectAsync` reopens on its own along the session-declaration path, §7.4). 〔History〕Early versions kept using it, and the next request read the previous request's late reply.
 
+〔Decision〕**Agent failures carry a kind** (`SshAgentException.FailureKind`, `SshAgentFailureKind`, with the endpoint in `Endpoint`): not running `NotRunning`, cannot connect `ConnectFailed`,
+the pipe owner cannot be read / is not trusted `PipeOwnerUnreadable` / `PipeOwnerUntrusted` (§7.2), calls after an exchange went out of step as above `ConversationOutOfStep`, closed before replying `ClosedBeforeReply`,
+communication failed `CommunicationFailed`, a reply that breaks the protocol `MalformedReply`, the signed algorithm does not match `SignatureAlgorithmMismatch` (04 §4.5), signing refused `SignRefused`, adding a key refused `AddRefused`,
+removing all refused `RemoveAllRefused`, a request over the message limit `RequestTooLarge` (§7.3). Reason codes are unchanged; callers word their messages by kind instead of parsing them.
+
 ### 7.2 Security requirements
 
 > **Agent forwarding is a loaded gun.** Root on the remote host can, while forwarding is active,
@@ -575,7 +584,7 @@ After each request is read and before it is handled, the forwarder checks once m
 and a request that arrives in between must not get one more signature after disposal has returned.
 
 〔Decision〕**On Windows, before connecting to an agent exposed as a named pipe, confirm that the pipe's owner is trusted**: the current user, SYSTEM or Administrators;
-otherwise refuse the connection. The OpenSSH agent's pipe name is fixed (`openssh-ssh-agent`); while the service isn't running, any local user can create that name first
+otherwise refuse the connection (`SshAgentException`, kind `PipeOwnerUntrusted`, with the owner's SID in `PipeOwner`; an owner that cannot be read is `PipeOwnerUnreadable`). The OpenSSH agent's pipe name is fixed (`openssh-ssh-agent`); while the service isn't running, any local user can create that name first
 and then receive our signing requests — and, when adding keys to the agent (§7.3), **plaintext private keys**. Whoever creates the pipe first can only make themselves its owner.
 This is not defended by lowering the impersonation level to Identification: the OpenSSH agent service stores keys as the connecting user, so lowering it would break the legitimate agent too.
 
@@ -700,7 +709,7 @@ the agent is locked (`ssh-add -x`), or the agent does not support this key type.
 | Request | Message number | Content | Method | Response |
 | --- | :-: | --- | --- | --- |
 | Remove one (`ssh-add -d`) | `18` `SSH_AGENTC_REMOVE_IDENTITY` | string public key blob (the certificate blob for a certificate) | `RemoveIdentityAsync` | SUCCESS → `true`; FAILURE (no such key, agent locked) → `false` |
-| Remove all (`ssh-add -D`) | `19` `SSH_AGENTC_REMOVE_ALL_IDENTITIES` | none | `RemoveAllIdentitiesAsync` | FAILURE throws `SshAgentException` (`AgentRefused`, the message names "locked") |
+| Remove all (`ssh-add -D`) | `19` `SSH_AGENTC_REMOVE_ALL_IDENTITIES` | none | `RemoveAllIdentitiesAsync` | FAILURE throws `SshAgentException` (`AgentRefused`, kind `RemoveAllRefused`, the message names "locked") |
 | Lock (`ssh-add -x`) | `22` `SSH_AGENTC_LOCK` | string passphrase | `LockAsync` | SUCCESS → `true`; FAILURE (already locked) → `false` |
 | Unlock (`ssh-add -X`) | `23` `SSH_AGENTC_UNLOCK` | string passphrase | `UnlockAsync` | SUCCESS → `true`; FAILURE (wrong passphrase, or not locked — the agent does not distinguish) → `false` |
 
@@ -859,7 +868,7 @@ for destination constraints this is a security matter: the user believes the key
 | End of `SshAgentHop` | Not `null` | `ArgumentNullException` |
 | User name of `SshAgentHop` | `null` = any; when given, non-empty, at most 255 bytes of UTF-8, no whitespace, control characters, `,` or `!` | `ArgumentException` |
 | `AllowedHops` | `null`, or 1–64 entries with no `null` element; entries kept as given, not deduplicated | `ArgumentException` |
-| The whole add message | Within the agent message limit (256 KiB, §7.1) | Throw `SshAgentException` (`LimitExceeded`) before sending; not a byte is sent |
+| The whole add message | Within the agent message limit (256 KiB, §7.1) | Throw `SshAgentException` (`LimitExceeded`, kind `RequestTooLarge`) before sending; not a byte is sent |
 
 Why these rules:
 
@@ -905,8 +914,8 @@ This library's `KnownHostsFile.Lookup` always rules a revoked key `Revoked` and 
 | Case | Result |
 | --- | --- |
 | `6` SUCCESS | Added |
-| `5` FAILURE, or `28` EXTENSION_FAILURE | `SshAgentException` (`AgentRefused`). With `AllowedHops`, the message names, in addition to the three common reasons in §7.3, "the agent does not support destination constraints (`restrict-destination-v00@openssh.com`, available since OpenSSH 8.9; non-OpenSSH agents most likely lack it)" |
-| Message larger than 256 KiB | Throw `SshAgentException` (`LimitExceeded`) before sending; the message says "the key or the destination constraints are too large" |
+| `5` FAILURE, or `28` EXTENSION_FAILURE | `SshAgentException` (`AgentRefused`, kind `AddRefused`, with `HasDestinationConstraints` saying whether constraints were attached). With `AllowedHops`, the message names, in addition to the three common reasons in §7.3, "the agent does not support destination constraints (`restrict-destination-v00@openssh.com`, available since OpenSSH 8.9; non-OpenSSH agents most likely lack it)" |
+| Message larger than 256 KiB | Throw `SshAgentException` (`LimitExceeded`, kind `RequestTooLarge`) before sending; the message says "the key or the destination constraints are too large" |
 
 〔Decision〕
 
@@ -918,7 +927,7 @@ This library's `KnownHostsFile.Lookup` always rules a revoked key `Revoked` and 
 4. **No new `SshFailureReason`.** The agent gives no reason, so `AgentRefused` is the truth; the caller knows it passed `AllowedHops` and the UI can add a hint on that basis
    without parsing the message. The host's `SshInterop.Localize` needs no change.
 5. **One more hint when a signature is refused.** When a destination-constrained key is used on a host, user or path it does not permit, the agent refuses to sign, and the authenticator records `SkippedNoMaterial` for that credential
-   and moves on to the next (04 §3.4). The message of a refused `SignAsync` adds, next to "the key is no longer in the agent" and "per-use confirmation was declined", "this key carries destination constraints (`ssh-add -h`)
+   and moves on to the next (04 §3.4). The message of a refused `SignAsync` (`AgentRefused`, kind `SignRefused`) adds, next to "the key is no longer in the agent" and "per-use confirmation was declined", "this key carries destination constraints (`ssh-add -h`)
    that do not permit this host, this user or this forwarding path".
 
 #### How it works with session binding (§7.4) and agent forwarding (§7)
@@ -1211,6 +1220,12 @@ This library also **has no connection-level forwarding switch** (§7.5.1): probe
 the temporary directory for `xauth` cannot be created, the server refusing `x11-req`; for the agent, the local agent cannot be reached (§7.1), the server refusing `auth-agent-req`.
 **The connection itself breaking and the caller cancelling are still thrown as-is** — they are not swallowed as a forwarding failure: once swallowed, the next request fails on the same dead channel anyway and the real cause is lost.
 The two are each handled by their own `FailureMode`; one failing to be set up does not drag down the other.
+The `SshForwardException` thrown (or put on `X11SetupFailure` / `AgentSetupFailure`) carries a kind (`SshForwardFailureKind`): for X11, no X display `NoX11Display`,
+the temporary directory for `xauth` cannot be created `XAuthTempDirectoryFailed`, `xauth` cannot start `XAuthStartFailed`, times out `XAuthTimedOut` (`Timeout`), fails `XAuthFailed` (`ExitCode` and `ErrorOutput`),
+produces no cookie `XAuthNoCookie`, the server refuses `x11-req` `X11ForwardRejected`; for the agent, the local agent is unavailable `LocalAgentUnavailable` (the inner exception is an `SshAgentException` with its own kind),
+the server refuses `auth-agent-req` `AgentForwardRejected`.
+〔Decision〕**`xauth`'s stderr is sanitized with `PeerText.SanitizeTail` before it goes into the message**, with line breaks folded into one line (`ErrorOutput` is that sanitized copy too); an ordinary one-line output is unchanged.
+〔History〕It used to be only `Trim`med, so output with control characters reached the message as is.
 
 ### 7.5.9 Reaching the local display through a connector
 
@@ -1256,8 +1271,9 @@ A stream from a connector (§7.5.9) has no "reset" to offer, so abort degrades t
 
 | Situation | Handling |
 | --- | --- |
-| Local port already in use | Throw `SshForwardException`, **leave no half-open listener** |
-| `tcpip-forward` rejected | Throw; the message points out "the server may have disabled AllowTcpForwarding / GatewayPorts" |
+| Local port already in use | Throw `SshForwardException`, **leave no half-open listener**. Kind `ListenFailed` (`Endpoint`; in use vs no permission is in the inner socket error code); the IPv6 loopback half failing to bind is `Ipv6LoopbackBindFailed`; a Unix socket path that already exists is `SocketPathExists`, one that is too long `SocketPathTooLong` |
+| `tcpip-forward` rejected | Throw; the message points out "the server may have disabled AllowTcpForwarding / GatewayPorts". Kind `RemoteListenRejected` (`Port`; privileged ports below 1024 get their own wording); a rejected `streamlocal-forward` is `RemoteSocketListenRejected`; asking the server to pick a port and getting no port in the reply is `NoBoundPortInReply` |
+| A forward fails to start under `ssh_config`'s `ExitOnForwardFailure yes` | `SshForwardException`, kind `ConfigForwardFailed`, with that line in `ConfigLine` (`StartForwardsAsync`, `09-dialing.md` §7.3) |
 | Channel open fails for a single connection | Raise the `Error` event, close that one inbound connection, **the forwarder keeps running** |
 | A single connection fails while relaying | Both sides aborted together (local RST, channel `CLOSE` without `EOF`), `Error` raised, the forwarder keeps running (§2.2) |
 | Accepting inbound connections fails repeatedly (e.g. EMFILE) | `Error` (`ForwardErrorReason.Accept`) each time; back off starting at 50 ms, doubling, capped at 1 second, then accept again (§2.4) |
@@ -1266,16 +1282,16 @@ A stream from a connector (§7.5.9) has no "reset" to offer, so abort degrades t
 | Zero-length domain name in a SOCKS request | Reply `0x08`, close that one (§3.1) |
 | Port 0 in a SOCKS request | Reply `0x01`, close that one (§3.1) |
 | SOCKS handshake times out (30 seconds by default) | Close that one, raise `Error` (`ForwardErrorReason.SocksHandshake`), the forwarder keeps running (§3.3) |
-| No matching forwarder for `forwarded-tcpip` | Reply `CHANNEL_OPEN_FAILURE(1)`; `(3)` when the connection has no remote forward at all |
+| No matching forwarder for `forwarded-tcpip` | Reply `CHANNEL_OPEN_FAILURE(1)`; `(3)` when the connection has no remote forward at all. These refusals sent only to the server have kinds as well (no matching forward `UnmatchedForwardedChannel`, X11 expired `X11ForwardingExpired`, channel limit `ChannelLimitReached`, local target unreachable `LocalTargetUnreachable`); a stopped forwarder is `Stopped` |
 | A forwarded channel arrives during a remote forward's disposal grace period | Accepted as usual if it matches (§4.3) |
 | Invalid forwarding options (`MaxConnections` below 1, a listening port outside 0–65535, a non-positive SOCKS handshake timeout, a null bind address) | 〔Decision〕Throw `ArgumentOutOfRangeException` / `ArgumentNullException` when set; if anything fails after the listener is up, the listener is closed on the spot. 〔History〕They used to go unchecked: with `MaxConnections = 0` the listener was already up when constructing the forwarder threw, and the port stayed taken until GC |
 | Starting a forward on a connection that is already disconnected (or disposed) | Fail outright: `ObjectDisposedException` once disposed, the recorded fault once declared dead — the same for local, dynamic and remote, and no listener is opened. 〔History〕Local / dynamic forwarding used to open the listener anyway and "succeed", returning a forwarder with `IsActive = false` |
 | Concurrent connections exceed the limit (〔Decision〕default 1024 per forwarder) | Reject new inbound connections and raise `Error`; existing connections are unaffected. Local/dynamic forwarding: close that inbound connection, `Error` (`ForwardErrorReason.ConnectionLimit`) — 〔Decision〕the event fires **at most once per second**, carrying how many were rejected in the meantime; the error count in the metrics still records every rejection (〔History〕it used to fire for every rejection, so a burst of connections at the limit made the host push each one to the UI). A connection the peer resets before accept (`ConnectionReset` / `ConnectionAborted`) causes no backoff and no report — it is that connection's own business and the listener is fine (〔History〕it used to be reported as an accept failure, backing the whole listener off from 50 ms). Remote forwarding: reply `CHANNEL_OPEN_FAILURE(4)` (resource shortage, §4.1), and likewise count it in `errors` and raise `Error` (`ConnectionLimit`, also at most once per second); 〔History〕it used to refuse that channel only, with no event and no count |
 | An event subscriber throws | Swallowed; other subscribers and the connection are unaffected (§5) |
-| The local agent cannot be reached when agent forwarding is requested | Do not send `auth-agent-req`; throw or start normally per `FailureMode` (§7.1, §7.5.8); the reason code is carried over from the agent side (`AgentNotRunning` / `AgentUnavailable`) |
+| The local agent cannot be reached when agent forwarding is requested | Do not send `auth-agent-req`; throw or start normally per `FailureMode` (§7.1, §7.5.8); the reason code is carried over from the agent side (`AgentNotRunning` / `AgentUnavailable`), kind `LocalAgentUnavailable` |
 | The local agent cannot be reached when an `auth-agent@openssh.com` channel arrives | Reply `CHANNEL_OPEN_FAILURE(2)`, with the description saying only "local ssh-agent unavailable"; the session and the forwarder are unaffected (§7.1) |
 | The local agent does not support session binding / drops the connection because of it | Forward as usual; on a drop, reconnect once without binding (§7.4) |
-| The agent refuses to add a key with destination constraints (`5` / `28`) | Throw `SshAgentException` (`AgentRefused`), the message names "the agent may not support destination constraints"; **never** retry by adding it without the constraint (§7.3.2) |
+| The agent refuses to add a key with destination constraints (`5` / `28`) | Throw `SshAgentException` (`AgentRefused`, kind `AddRefused`, `HasDestinationConstraints` true), the message names "the agent may not support destination constraints"; **never** retry by adding it without the constraint (§7.3.2) |
 | A destination-constrained key is used on a host, user or path it does not permit | The agent refuses to sign; authentication records `SkippedNoMaterial` for that credential and moves on to the next, a forwarding remote gets `FAILURE` (§7.3.2) |
 | The remote sends an agent extension other than `session-bind@openssh.com` | Reply `FAILURE`; it never reaches the local agent (§7.4) |
 

@@ -410,7 +410,7 @@ no flag means SHA-1. A certificate's algorithm name is `rsa-sha2-512-cert-v01@op
 it does not match, the flag stays empty, and the agent produces a SHA-1 `ssh-rsa` signature — which contradicts the algorithm declared
 in the request, and is exactly the kind §4.4 disables by default.
 
-〔Decision〕**The algorithm name in the signature the agent returns is checked**: if it differs from the one requested (with the certificate suffix stripped), the signature is not handed on; an `SshAgentException` (`Unsupported`) is thrown,
+〔Decision〕**The algorithm name in the signature the agent returns is checked**: if it differs from the one requested (with the certificate suffix stripped), the signature is not handed on; an `SshAgentException` (`Unsupported`, kind `SignatureAlgorithmMismatch`, with the two algorithm names in `RequestedAlgorithm` / `SignedAlgorithm`, the latter from the agent and unsanitized) is thrown,
 and the credential is skipped as "a problem with the material" (§3.4). An old agent that does not understand the SHA-2 flags still returns an `ssh-rsa` signature: it used to be handed on as-is,
 the authenticator sent it to the server as `rsa-sha2-512`, the user saw only Permission denied, and the intent of `AllowSha1RsaSignatures = false` was quietly bypassed.
 
@@ -491,7 +491,7 @@ when the ciphertext is at most 320 bytes ECDSA is tried first (an elliptic-curve
 
 〔Decision〕**A private key file is foreign input, and anything that cannot be understood is an `SshPrivateKeyException` (`KeyFormatInvalid`)**, whatever the format and wherever the error is:
 truncation (a copy and paste lost the last line, with the base64 breaking exactly on a 4-character boundary), malformed fields (a `.ppk` with `Public-Lines: abc`, an RSA key whose p or q is 1).
-The original exception is kept as the inner one. Likewise, **a malformed reply from the agent** (a truncated identity list or signature) is an `SshAgentException` (`ProtocolError`).
+The original exception is kept as the inner one. Likewise, **a malformed reply from the agent** (a truncated identity list or signature) is an `SshAgentException` (`ProtocolError`, kind `MalformedReply`).
 Internal exceptions from the parsing layer, or BCL ones such as `FormatException` / `DivideByZeroException`, used to leak out as they were — callers only catch these two exception types, so they went all the way to the UI.
 
 〔Decision〕**Writing a private key file: `SshPrivateKeyFile.Format(key, passphrase, comment, kdfRounds)`, which writes `openssh-key-v1` only**

@@ -399,7 +399,7 @@ agent 协议里 RSA 用哪种 SHA-2 靠 `SSH_AGENT_RSA_SHA2_256` / `SSH_AGENT_RS
 对不上，标志位就空着，agent 签出来的是 SHA-1 的 `ssh-rsa` —— 与请求里声明的算法不符，
 而且正是 §4.4 默认要禁掉的那一种。
 
-〔决策〕**agent 签回来的签名要核对算法名**：与请求的（去掉证书后缀）不一致就不交出去，报 `SshAgentException`（`Unsupported`），
+〔决策〕**agent 签回来的签名要核对算法名**：与请求的（去掉证书后缀）不一致就不交出去，报 `SshAgentException`（`Unsupported`，种类 `SignatureAlgorithmMismatch`，两个算法名在 `RequestedAlgorithm` / `SignedAlgorithm`，后者来自 agent、未清洗），
 这条凭据按「材料有问题」跳过（§3.4）。不认 SHA-2 标志位的老 agent 会照旧回一个 `ssh-rsa` 签名：曾经原样交出去，
 认证器当 `rsa-sha2-512` 发给服务端，用户只看到 Permission denied，`AllowSha1RsaSignatures = false` 的意图也被悄悄绕过。
 
@@ -478,7 +478,7 @@ RFC 8410 附录 A 的两个错例（公钥少一个字节）真 `ssh-keygen` 照
 
 〔决策〕**私钥文件是外来输入，读不懂一律是 `SshPrivateKeyException`（`KeyFormatInvalid`）**，不论哪种格式、错在哪一层：
 截断（复制粘贴丢了尾行，base64 恰好在 4 字符边界断开）、字段畸形（`.ppk` 的 `Public-Lines: abc`、RSA 的 p 或 q 为 1）。
-原来的异常挂在内层。同理，**agent 回的应答格式不对**（身份列表、签名被截断）是 `SshAgentException`（`ProtocolError`）。
+原来的异常挂在内层。同理，**agent 回的应答格式不对**（身份列表、签名被截断）是 `SshAgentException`（`ProtocolError`，种类 `MalformedReply`）。
 曾经让解析层 internal 的异常或 BCL 的 `FormatException` / `DivideByZeroException` 原样漏出去 —— 调用方只接这两种异常，那就一路漏到了界面上。
 
 〔决策〕**写私钥文件：`SshPrivateKeyFile.Format(key, passphrase, comment, kdfRounds)`，只写 `openssh-key-v1` 一种**

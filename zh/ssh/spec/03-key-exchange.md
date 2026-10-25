@@ -576,16 +576,21 @@ flowchart TD
     A[收到 KEX REPLY] --> B{签名算法名<br/>== 协商出的<br/>主机密钥算法?}
     B -->|否| X[ProtocolError 断开]
     B -->|是| C{K_S 的类型串<br/>与算法匹配?<br/>RSA 注意 §5.1}
-    C -->|否| X
+    C -->|否| X1[HostKeyRejected 断开<br/>HostKeyAlgorithmMismatch]
     C -->|是| D{RSA 且模数<br/>< MinimumRsaKeyBits?}
-    D -->|是| X2[HostKeyRejected 断开]
+    D -->|是| X2[HostKeyRejected 断开<br/>HostKeyTooShort]
     D -->|否| E[算 H]
     E --> F{用 K_S 验 sig H}
-    F -->|失败| X3[HostKeyRejected 断开]
+    F -->|失败| X3[HostKeyRejected 断开<br/>HostKeySignatureInvalid]
     F -->|成功| G[IHostKeyPolicy 裁决 K_S]
-    G -->|拒绝| X4[HostKeyRejected 断开<br/>带策略给出的原因]
+    G -->|拒绝| X4[HostKeyRejected / HostKeyChanged 断开<br/>HostKeyPolicyRejected，带策略给出的原因]
     G -->|接受| H[继续，发 NEWKEYS]
 ```
+
+各个拒绝出口在 `SshConnectException.FailureKind` 上标明种类（`08-failures.md` §二）：`K_S` 解析不了是 `HostKeyRejected` + `HostKeyMalformed`；
+类型串与协商出的算法对不上（含谈成证书算法而 `K_S` 不是证书，或反过来）是 `HostKeyRejected` + `HostKeyAlgorithmMismatch`、带 `HostKeyType` / `HostKeyAlgorithm` ——
+〔历史〕这张图曾把这一处画成走 `ProtocolError` 出口，实现一直报的是 `HostKeyRejected`；RSA 太短带 `HostKeyBits` / `MinimumHostKeyBits`。
+这四种都发生在问策略之前，消息是本库的；策略拒绝时种类是 `HostKeyPolicyRejected`（裁决没填原因时 `HostKeyPolicyRejectedWithoutReason`），消息就是策略给的原因。
 
 **顺序的三个理由**：
 
@@ -640,7 +645,7 @@ ValueTask<SshHostKeyVerdict> EvaluateAsync(SshHostKeyContext context, Cancellati
   居中时左边取 `(17 − 长度) / 2` 向下取整，其余补在右边。下框同样居中 `[SHA256]`。左右两边是 `|`。行与行之间用 `\n`。
 
 `SshHostKeyVerdict` 只能由四个工厂成员得到：`Accept` / `AcceptAndPersist` / `Reject(message)` / `RejectChanged(message)`。
-**拒绝必须带原因文本**，它会原样进 `SshConnectException.Message` ——
+**拒绝必须带原因文本**，它会原样进 `SshConnectException.Message`（`FailureKind = HostKeyPolicyRejected` 标明这是策略的话，库不改写）——
 这是直接冲着「用户只看到一句 UntrustedPeer、不知道该去哪删记录」去的。
 原因码由拒绝的种类定（`SshHostKeyVerdict.Reason`）：`Reject` 是 `HostKeyRejected`；
 `RejectChanged` 是 `HostKeyChanged` —— 记着的密钥变了，或者只记着别的类型（下一条决策），可能是中间人。

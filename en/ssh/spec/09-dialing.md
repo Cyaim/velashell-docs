@@ -53,6 +53,8 @@ If the target is an IP literal, send it as an IP; otherwise send it as a domain 
 
 The order is **nearest to farthest**: item 0 is the hop closest to the local machine.
 When an inner dialer fails, the outer dialer **preserves** the hop information given by the inner one **as-is**, and only appends its own after it (if it got as far as itself).
+〔Decision〕When `DialHops` rewraps an exception only to add hop information, the original `FailureKind` and parameters (`Via` / `Target` / `ProxyReplyCode` / `ProxyReply`) are carried over unchanged;
+the kind is a required parameter of `ProxyDialing.Refused` / `Misconfigured`, so a forgotten classification is caught at compile time.
 
 〔Decision〕**`ISshTransportDialer` does not ask implementers to declare "what kind am I".** It used to have a public `Kind` member: an implementation that picks its route on every dial
 (direct this time, through a proxy next time — the host's proxy dialer works that way) cannot give a true value and could only record "the last one"; and the member was only read when the dialer served as a proxy's inner dialer (`via`).
@@ -61,15 +63,16 @@ For the same reason, the host key decision material (`SshHostKeyContext`) droppe
 
 Reason code conventions:
 
-| Situation | `Reason` |
-| --- | --- |
-| The proxy itself cannot be reached (when dialing the proxy directly: cannot resolve, refused, timed out, unreachable) | `ProxyUnreachable` (retryable); which of them is in `InnerException` (the original `DnsFailure` / `TcpRefused` / `TcpTimeout` / `TcpUnreachable`) and in `Hops`. When the proxy is reached through another proxy or a jump host (nesting), the reason that hop reported is kept. 〔History〕This used to be the same as a direct connection, so callers could not tell whether the target or the proxy was down, and the host had to rewrite every proxy failure into `ProxyRefused` |
-| The proxy refuses to forward to the target | `ProxyRefused` |
-| The proxy requires authentication and we have no credentials | `ProxyAuthRequired` |
-| The proxy rejects the credentials we configured | `ProxyAuthFailed` |
-| The request cannot even be sent locally: the host name does not fit the proxy protocol, the credentials are too long, the `ProxyCommand` shell cannot start | `InvalidConfiguration` |
-| What the proxy says does not conform to the protocol | `ProxyRefused`, with `Detail` stating what was received |
-| The proxy accepts the connection but never answers the handshake, and the connect timer fires | `Timeout` (`Phase` is `Dialing`), with `Hops` recording "reached the proxy + this hop failed" — the same approach as for jump hosts (§2.4), not reported as "TCP connect timed out" |
+| Situation | `Reason` | Kind (`FailureKind`, `08-failures.md` §5.2) |
+| --- | --- | --- |
+| The proxy itself cannot be reached (when dialing the proxy directly: cannot resolve, refused, timed out, unreachable) | `ProxyUnreachable` (retryable); which of them is in `InnerException` (the original `DnsFailure` / `TcpRefused` / `TcpTimeout` / `TcpUnreachable`) and in `Hops`. When the proxy is reached through another proxy or a jump host (nesting), the reason that hop reported is kept. 〔History〕This used to be the same as a direct connection, so callers could not tell whether the target or the proxy was down, and the host had to rewrite every proxy failure into `ProxyRefused` | `ProxyConnectFailed` (`Via` is the proxy, `Target` the destination; when nested, that hop's own kind is kept) |
+| The proxy refuses to forward to the target | `ProxyRefused` | SOCKS5 `Socks5ConnectRefused` (§3.4), HTTP `HttpConnectRefused` (§4.2), jump host `JumpForwardRefused` (§5) |
+| The proxy requires authentication and we have no credentials | `ProxyAuthRequired` | — (the reason code already says it) |
+| The proxy rejects the credentials we configured | `ProxyAuthFailed` | — |
+| The request cannot even be sent locally: the host name does not fit the proxy protocol, the credentials are too long, the `ProxyCommand` shell cannot start | `InvalidConfiguration` | A host name that does not fit the request `ProxyTargetNameInvalid` (`Target` is that name), SOCKS5 credentials too long `Socks5CredentialsTooLong` |
+| What the proxy says does not conform to the protocol | `ProxyRefused`, with `Detail` stating what was received | SOCKS5 `Socks5VersionMismatch` / `Socks5UnexpectedMethod` / `Socks5InvalidAddressType` (§3), HTTP `HttpProxyNotHttp` / `HttpProxyResponseTooLarge` (§4.2) |
+| The proxy accepts the connection but never answers the handshake, and the connect timer fires | `Timeout` (`Phase` is `Dialing`), with `Hops` recording "reached the proxy + this hop failed" — the same approach as for jump hosts (§2.4), not reported as "TCP connect timed out" | `ProxyHandshakeTimeout` |
+| The proxy accepts the connection and drops it halfway through the handshake | The original reason code is kept | `ProxyClosedDuringHandshake` |
 
 ### 2.3 No over-reading when reading handshake replies
 
@@ -120,7 +123,8 @@ otherwise it first resolves the name and gets **all** addresses (it does not do 
 4. If all fail, the **last** failure is reported, classified as `DnsFailure` / `TcpRefused` / `TcpTimeout` / `TcpUnreachable` (`08-failures.md` §3),
    with a single `Tcp` entry in `Hops`. 〔Decision〕The classification follows the socket error faithfully: not found, a temporary DNS failure (`EAI_AGAIN`, the most common one when the network is down)
    and an unrecoverable DNS error → `DnsFailure`; refused → `TcpRefused`; timed out → `TcpTimeout`; network or host unreachable, local network down,
-   host not responding → `TcpUnreachable`; anything else (a local firewall blocking outbound traffic, a local address not available, …) → `Unknown`.
+   host not responding → `TcpUnreachable`; anything else (a local firewall blocking outbound traffic, a local address not available, …) → `Unknown`, with kind `TcpConnectFailed` and `Target`;
+   the error code is in the inner `SocketException` — a caller can say "connecting to X failed" plus the system's own words without parsing a sentence.
    Anything unrecognized used to be reported as `TcpRefused`: with the network down, the user saw "connection refused" and went checking the server.
 
 ```mermaid
@@ -174,8 +178,8 @@ sequenceDiagram
 | Method list | N | Always includes `0` (no authentication); adds `2` (username/password) when credentials are configured |
 
 The reply is two bytes: version (must be `5`) and the selected method.
-Selecting `0xFF` means "no acceptable methods": judged `ProxyAuthRequired` if we have no credentials configured, `ProxyRefused` if we do.
-Selecting a method we did not offer is a protocol error.
+Selecting `0xFF` means "no acceptable methods": judged `ProxyAuthRequired` if we have no credentials configured, `ProxyRefused` if we do (kind `Socks5NoAcceptableMethod`).
+Selecting a method we did not offer is a protocol error (`ProxyRefused`, kind `Socks5UnexpectedMethod`, `ProxyReplyCode` is that method byte); a version byte other than `5` is `Socks5VersionMismatch`.
 
 ### 3.2 Username/password sub-negotiation (RFC 1929)
 
@@ -187,7 +191,7 @@ Selecting a method we did not offer is a protocol error.
 | Password length | 1 | 1–255 |
 | Password | N | UTF-8 |
 
-〔Decision〕When the encoded username or password exceeds 255 bytes, **reject locally** (`InvalidConfiguration`); do not truncate.
+〔Decision〕When the encoded username or password exceeds 255 bytes, **reject locally** (`InvalidConfiguration`, kind `Socks5CredentialsTooLong`); do not truncate.
 The reply is two bytes: sub-negotiation version and status; a non-zero status is judged `ProxyAuthFailed` (credentials rejected).
 
 ### 3.3 Connect request
@@ -219,7 +223,8 @@ otherwise the remaining bytes would be taken as the SSH identification string.
 | 7 | Command not supported |
 | 8 | Address type not supported |
 
-Any non-zero code is judged `ProxyRefused`.
+Any non-zero code is judged `ProxyRefused`, kind `Socks5ConnectRefused`, with the result code in `ProxyReplyCode` — a UI words "not allowed by ruleset", "connection refused by the target"… from it instead of parsing a sentence.
+An address type other than 1 / 3 / 4 in the reply is judged `ProxyRefused`, kind `Socks5InvalidAddressType` (`ProxyReplyCode` is that byte).
 
 ---
 
@@ -254,14 +259,14 @@ and host names often do not come from whoever wrote the configuration (`ssh://` 
 
 ### 4.2 Response
 
-- Read up to the first empty line (`CRLF CRLF`); response headers are capped at 16 KiB, and exceeding that is judged `ProxyRefused`.
+- Read up to the first empty line (`CRLF CRLF`); response headers are capped at 16 KiB, and exceeding that is judged `ProxyRefused` (kind `HttpProxyResponseTooLarge`); a reply that is not HTTP at all is `HttpProxyNotHttp`.
 - A 2xx status code is success; over-read bytes are handed back to the upper layer (§2.3).
 - 〔Decision〕A 1xx (except 101) is an interim response: skip it and read on to the final response (RFC 9110 §15.2); several interim responses together are still bound by the response header size limit.
   〔History〕Early versions treated it as a refusal.
 - 407: judged `ProxyAuthRequired` if no credentials are configured; if they are configured (meaning they were rejected) it is judged `ProxyAuthFailed`,
   with `Detail` carrying the value of the `Proxy-Authenticate` header. 〔Decision〕The two are separate: one means "configure them", the other "correct them"; they used to share `ProxyAuthRequired`,
   so the host had to tell them apart by whether credentials were configured.
-- Other status codes are judged `ProxyRefused`, with `Detail` carrying the status line.
+- Other status codes are judged `ProxyRefused`, with `Detail` carrying the status line; kind `HttpConnectRefused`, `ProxyReplyCode` is the status code and `ProxyReply` the status line as received (from the proxy, unsanitized).
 - 〔Decision〕When the target port is 22 and the proxy replies 403 / 405 / 501, **give a suggestion directly** in the message:
   "this proxy may only allow 80/443 — please use SOCKS5 instead, or have the server listen on 443".
   This is a frequent failure that users have no way of guessing (`08-failures.md` §5.2).
@@ -312,7 +317,7 @@ sequenceDiagram
 - The target address is resolved **from the jump host's point of view** (§2.1).
 - The originator address of `direct-tcpip` is filled with `127.0.0.1`, port `0`: we have no real originating socket,
   and fabricating a realistic-looking address would only mislead the server's logs.
-- A rejected channel is judged `ProxyRefused`, with `Detail` carrying the reason code and description from `CHANNEL_OPEN_FAILURE`;
+- A rejected channel is judged `ProxyRefused` (kind `JumpForwardRefused`; the inner exception is the channel exception with its own kind), with `Detail` carrying the reason code and description from `CHANNEL_OPEN_FAILURE`;
   a failure to connect to the jump host is thrown as-is, but `Hops` marks the failure as being at the jump hop. 〔Decision〕**When the jump host's own authentication fails, an `SshAuthenticationException` is still thrown**: the per-attempt records and the methods the server offered stay at the top level, and the message names the hop (one already reported this way from a deeper hop passes through unchanged rather than being wrapped again). 〔History〕It used to be rewritten to `SshConnectException`, leaving that structured information only in `InnerException`, so the host treated it as "cannot connect" rather than "authentication failed".
   〔Decision〕**Only `CHANNEL_OPEN_FAILURE` means "refused to forward".** If the jump host itself drops or violates the protocol while the tunnel is being opened, report its own reason code
   (`ClosedByPeer` is retryable, `ProtocolError` is not), with `Hops` still marking the forwarding hop. This used to be rewritten to `ProxyRefused` every time, so a dropped connection was described as "the jump host refused".
@@ -321,6 +326,8 @@ sequenceDiagram
 - When the jump connection drops mid-way, reads on the stream throw the jump connection's failure (**not** end-of-stream, `05-connection.md` §4.4) and writes fail —
   the target connection drops with it, which is expected. Reads end only when the channel is closed normally (the jump host side sent EOF / CLOSE).
 - Host key decisions and authentication on the jump host both pause the outer connect timer; when the outer timer expires in this hop, the failure says which hop timed out (§2.4).
+- Kinds (`SshConnectException.FailureKind`, `Via` is the jump host, `Target` the destination): the jump host cannot be reached `JumpConnectFailed` (the reason code is that hop's, with its exception inside),
+  connecting via the jump host timed out `JumpConnectTimeout`, refused to forward `JumpForwardRefused`, failed while forwarding (the jump host dropped or violated the protocol) `JumpForwardFailed`, forwarding timed out `JumpForwardTimeout`.
 
 ### 5.1 A channel as a byte stream
 
@@ -352,7 +359,7 @@ When treating an SSH channel as a bidirectional byte stream:
 - 〔Decision〕**Values starting with `-` are not substituted either** (same failure). Every character may be legal and the value can still turn into something else: `nc` / `ncat` / `socat` / `ssh`
   in the template parse values such as `-e` or `-oProxyUseFdpass` as **options** — argument injection (the same class as Git's CVE-2017-1000117).
   Legitimate host and user names do not start with `-`.
-- The program exits before connecting (before it has written anything to stdout): judged `ProxyRefused` (`Phase` is `Dialing`), with the message carrying the exit code and the tail of stderr (not truncated, at most 4096 characters),
+- The program exits before connecting (before it has written anything to stdout): judged `ProxyRefused` (`Phase` is `Dialing`, kind `ProxyCommandExited`: `Via` is the command line, `ProxyReplyCode` the exit code, `ProxyReply` the end of stderr), with the message carrying the exit code and the tail of stderr (not truncated, at most 4096 characters),
   and `Hops` carrying the `ProxyCommand` hop. 〔Decision〕It used to throw an `IOException`, which connection setup classified as "the peer closed the connection", with the message cut to 256 characters —
   proxy programs often explain the failure only on the last line of stderr, which is exactly the part that was cut. A program that exits with a non-zero code after it has written data means the connection dropped (`ClosedByPeer`); the message carries stderr as well.
 - The local shell cannot start (the program `ComSpec` points to is missing or not executable): judged `InvalidConfiguration` — retrying will not help.
