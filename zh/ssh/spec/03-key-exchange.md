@@ -223,19 +223,20 @@ RFC 8308 §2.2 明确要求 `ext-info-c` 只出现在**第一次** KEXINIT 里�
 - 〔注意〕nistp521 的坐标是 66 字节（521 位），`0x04 ‖ X ‖ Y` 共 133 字节。
   按 64 或 65 字节假设写死的实现会在这条曲线上崩掉。
 
-### 3.4 `diffie-hellman-group14-sha256` / `group16-sha512`（RFC 8268）
+### 3.4 `diffie-hellman-group14-sha256` / `group16-sha512` / `group18-sha512`（RFC 8268）
 
 | 名字 | 群 | 哈希 |
 | --- | --- | --- |
 | `diffie-hellman-group14-sha256` | MODP 2048 位（RFC 3526 Group 14） | SHA-256 |
 | `diffie-hellman-group16-sha512` | MODP 4096 位（RFC 3526 Group 16） | SHA-512 |
+| `diffie-hellman-group18-sha512` | MODP 8192 位（RFC 3526 Group 18） | SHA-512 |
 | `diffie-hellman-group14-sha1` | Group 14 | SHA-1。**默认关闭**，〔互操作〕老设备 |
 
 - `e = g^x mod p`（客户端）、`f = g^y mod p`（服务端），都按 `mpint`。
 - `K = f^x mod p`，按 `mpint`。
 - **必须校验** `1 < e,f < p-1`。不校验等于接受小子群攻击。
 - 私指数 `x` 的比特数**应当**至少是哈希输出的两倍（RFC 4253 §8 的建议）。
-  〔决策〕统一取 **2× 哈希长度**（group14-sha256 → 512 位），不用群的完整位宽 ——
+  〔决策〕统一取 **2× 哈希长度**（group14-sha256 → 512 位，group16 / group18 → 1024 位），不用群的完整位宽 ——
   完整位宽没有额外安全收益，只是让模幂慢一大截。
 
 ### 3.5 `diffie-hellman-group-exchange-sha256`（RFC 4419）

@@ -224,19 +224,20 @@ Both names are sent, and they share one implementation.
 - 〔Note〕The coordinates of nistp521 are 66 bytes (521 bits); `0x04 ‖ X ‖ Y` totals 133 bytes.
   Implementations that hard-code an assumption of 64 or 65 bytes will crash on this curve.
 
-### 3.4 `diffie-hellman-group14-sha256` / `group16-sha512` (RFC 8268)
+### 3.4 `diffie-hellman-group14-sha256` / `group16-sha512` / `group18-sha512` (RFC 8268)
 
 | Name | Group | Hash |
 | --- | --- | --- |
 | `diffie-hellman-group14-sha256` | MODP 2048-bit (RFC 3526 Group 14) | SHA-256 |
 | `diffie-hellman-group16-sha512` | MODP 4096-bit (RFC 3526 Group 16) | SHA-512 |
+| `diffie-hellman-group18-sha512` | MODP 8192-bit (RFC 3526 Group 18) | SHA-512 |
 | `diffie-hellman-group14-sha1` | Group 14 | SHA-1. **Off by default**, 〔Interop〕old devices |
 
 - `e = g^x mod p` (client), `f = g^y mod p` (server), both as `mpint`.
 - `K = f^x mod p`, as `mpint`.
 - **MUST validate** `1 < e,f < p-1`. Not validating amounts to accepting small-subgroup attacks.
 - The bit length of the private exponent `x` **SHOULD** be at least twice the hash output (the recommendation of RFC 4253 §8).
-  〔Decision〕Uniformly use **2× the hash length** (group14-sha256 → 512 bits), not the full bit width of the group ——
+  〔Decision〕Uniformly use **2× the hash length** (group14-sha256 → 512 bits, group16 / group18 → 1024 bits), not the full bit width of the group ——
   the full width brings no additional security, it only makes modular exponentiation much slower.
 
 ### 3.5 `diffie-hellman-group-exchange-sha256` (RFC 4419)

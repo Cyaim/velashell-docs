@@ -445,6 +445,11 @@ excluding the second in progress costs one to two seconds of lag.
 〔Decision〕**Wait in the copy loop, before writing to the other side**: while waiting nothing more is read, the data stays in the read buffer, and backpressure flows back to the sender through the TCP window / channel window ——
 no extra buffer and no dropped data. Use: with several tunnels open over a slow link, one download cannot crowd out the interactive terminal.
 
+〔Decision〕**Large chunks are split.** When one read returns more than one second's allowance (the channel side can hand over several hundred KB at once on a busy machine), the loop does not reserve, wait for and write the whole chunk at once.
+It moves the data in segments, each no larger than one buffer (32 KiB, §6) and no larger than what the limiter grants (at most one second's allowance), waiting and writing segment by segment; what is not yet moved stays in the read buffer.
+The average rate is unchanged, a single burst never exceeds one second's allowance, and the byte counts and rate on the panel climb steadily. If the forwarder shuts down or the connection aborts while waiting for allowance, it stops at once and counts only what was written.
+Without a rate limit the whole chunk is written as before. 〔History〕It used to wait for the whole chunk: a 64 KB/s tunnel that read 256 KB at once wrote nothing for three seconds, then wrote all 256 KB in one go.
+
 ---
 
 ## 6. The copy loop
