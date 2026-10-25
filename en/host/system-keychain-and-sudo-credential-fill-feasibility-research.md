@@ -20,6 +20,29 @@ The remaining sections of this document keep the research context of 2026-08-25;
 - **Correction of 2026-10-16**: the entry shape changed from "a button in the top-right corner + a light hint + a confirming picker" to "as soon as a prompt line is detected, a list pops up on the line below the cursor, and clicking a row fills it". Wording about "confirming" above and below should be read as "clicking" under the new shape; the "suggest filling only when echo is off" below does not hold either, and the risk notice is now permanently shown above the list.
 - When this erratum was written, this research had no English counterpart; the current facts were synced to the English [interaction-and-ui-specs.md](interaction-and-ui-specs.md#521-fill-a-shared-password-628-2026-10-15-entry-shape-redone-2026-10-16).
 
+## 2026-10-25 implementation erratum (phase one done)
+
+Phases zero and one have landed (the first step of master password protection): on macOS / Linux the local encryption key is handed to the system keychain, while Windows keeps the DPAPI-wrapped key file.
+The design of the second step (an optional master password) is in [master-password-design.md](master-password-design.md). Differences from the research below:
+
+- **Interface shape**: the name is still `IMasterKeyStore` (`Core/Data`), but its shape is "`Load` / `Save` by entry id, synchronous, every failure returned as `Unavailable(reason)` instead of thrown",
+  not the `TryLoad(out key)` / `IsAvailable` of §3.2. The fallback chain, migration and multiple keys all live in `Infrastructure/Persistence/MasterKeyResolver`;
+  there are no `FileMasterKeyStore` / `InMemoryMasterKeyStore` classes as drawn in §3.1 (the resolver manages the local key file itself, and the in-memory implementation exists only in tests).
+- **Windows does not use Credential Manager** (`CredWriteW`): it keeps `secret.key` wrapped with DPAPI (current user), which is already keychain-grade; the "main benefit is that it becomes visible / revocable in Credential Manager" of the Windows row in §2 is not done.
+- **macOS**: `SecItem*` + a generic password in the login keychain, service `com.velashell.master-key`, account = entry id. Access control is opened to "any application" (the equivalent of `security add-generic-password -A`) —
+  release builds are ad-hoc signed and the signature changes with every release, so the default access control would raise an authorization prompt on the first start after every update; this is how the "item ACL bound to the code signature" pitfall of the §2 table is handled.
+  Opened up, it sits at the same level as the former 0600 file (readable by the user's own processes); what it stops is "walking off with the data directory". With a stable Developer ID signature it can go back to trusting only VelaShell.
+- **Linux**: libsecret's `secret_password_lookupv_sync` / `secret_password_storev_sync` (the non-variadic variants), schema `com.velashell.MasterKey`, attribute `key-id`, in the default collection.
+  No libsecret installed, no session bus, or a locked keyring whose unlock prompt was cancelled → fall back to the file, log it and post a message-center notice — item 3 of §8 ("fall back silently") is settled this way: **not silently**, one notice.
+- **Entry ids and the list**: the data directory gains `secret.key.ref`, which lists entry ids only and holds no key material; id = the first 128 bits of a domain-separated SHA-256 of the key, so an interrupted migration always writes to the same entry, and a key read back can vouch for itself against its id.
+- **Migration and rollback**: "keep the file copy for one release cycle after migrating" from §3.1 is **not adopted** (keeping a plaintext copy means nothing was migrated). Migration is "write to the keychain → read back and compare → write the list atomically → delete the file",
+  and the deletion first renames to `.deleting`, then zeroes and deletes; any failing step stops at "still works as before" and is retried at the next start. Rollback safety comes from **keeping several keys side by side** instead: decryption tries each key in turn (the GCM tag tells whether it is the right one),
+  encryption uses the first, and no key is ever dropped automatically; the list records every id, a run in which the keychain is unavailable gets a fresh local key that is merged once the keychain is back, and a `secret.key` created by an older version is merged the same way after upgrading again.
+- **Asynchrony**: the interface is synchronous; resolution happens once at start-up (once `App.Initialize` has built the container) on a background thread, so D-Bus round trips and keyring unlock prompts never block the UI thread (the approach of §3.1).
+- **"Show it honestly"**: not a row on the settings page but system messages in the message center (key file replaced / a key missing from the keychain / keychain unavailable right now / never migrated and the keychain unusable),
+  see [message-center-and-feed.md](message-center-and-feed.md) §4A; `MasterKeyStatus` carries the protection level and the reason, so a settings page can read them directly if it ever shows them.
+- Troubleshooting escape hatch: the environment variable `VELASHELL_NO_KEYCHAIN=1` turns the system keychain off (keys already moved there are not lost and come back on the first start without the variable); every start logs one `[Secrets] Master key: …` line, without key material.
+
 ## 0. Conclusion first
 
 Both are doable, but **they are two independent things** with different value and different risk, so they should be phased:

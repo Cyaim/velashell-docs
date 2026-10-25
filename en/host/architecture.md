@@ -432,8 +432,9 @@ graph TD
 ```
 
 **Sensitive fields are encrypted at rest**: passwords, key passphrases and sync tokens go through
-`ISecretProtector` (AES-256-GCM plus the local key file `~/.velashell/secret.key`, ciphertext
-prefixed `enc1:`). The passwords and key passphrases of shared credentials (`shared_credentials`) are treated the same
+`ISecretProtector` (AES-256-GCM plus the local encryption key, ciphertext prefixed `enc1:`); since 2026-10-25 the key
+lives in the system keychain on macOS / Linux (the data directory holds only the entry list `~/.velashell/secret.key.ref`,
+falling back to `~/.velashell/secret.key` when the keychain is unavailable), and in the DPAPI-wrapped `secret.key` on Windows. The passwords and key passphrases of shared credentials (`shared_credentials`) are treated the same
 way; for a connection profile that references a shared credential (`CredentialSource` set), the session repository
 clears its authentication material (password, private-key path, passphrase, certificate path) at the moment it is
 written — enforced in the repository rather than at each save site, because there are seven or eight of them and

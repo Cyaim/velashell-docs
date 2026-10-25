@@ -16,7 +16,7 @@ is documented on `Core/Notifications/INotificationCenter`; read it before adding
 
 | | Message center | Runtime alerts |
 | --- | --- | --- |
-| Examples | Update available, product news, CVE advisories | Fingerprint change, session drop, transfer failure |
+| Examples | Update available, product news, CVE advisories, last run ended unexpectedly, local encryption key could not be read | Fingerprint change, session drop, transfer failure |
 | Presentation | Bell badge + list, revisitable | Dialog / status bar / tab flash, gone once seen |
 | Retention | Across restarts (SonnetDB `notifications`) | None (security events also go to the audit log) |
 | Owner | `INotificationCenter` | `ISecurityAlertService` / individual panels |
@@ -37,7 +37,7 @@ is clamped back into view when it would leave, and the position is written on mo
 - **Each message**:
   - Unread rows carry a 2px accent bar on the left with a primary-colour Medium title; read rows fall
     back to secondary colour and normal weight
-  - First line: kind badge (News / Update / Security / Offer; `warning` and `critical` severities
+  - First line: kind badge (News / Update / Security / Offer / System; `warning` and `critical` severities
     switch to an outlined warning colour) + relative time
   - Title (wraps), body (two lines max, then ellipsis)
   - Destination line, **justified**: host name pinned left, action label + `›` pinned right, and only
@@ -246,6 +246,25 @@ check runs; if a newer version exists, a message is posted that lands on the Abo
 > hid it). It now genuinely decides whether the startup check runs, and is therefore visible again on
 > the General page. Update channel remains unwired and stays hidden; automatic download was wired on 2026-10-24 (settings
 > audit R-03).
+
+## 4A. Local content source: the local encryption key (since 2026-10-25)
+
+The first step of master password protection handed the local encryption key to the system keychain (the macOS keychain / the Linux Secret Service; Windows
+keeps the DPAPI-wrapped key file — see the 2026-10-25 erratum at the top of [system-keychain-and-sudo-credential-fill-feasibility-research.md](system-keychain-and-sudo-credential-fill-feasibility-research.md)).
+The key is resolved once at start-up; when the result has something the user should know, a "System" message is posted instead of a start-up dialog —
+for the same reason as the crash notice. These messages explain why saved passwords cannot be decrypted, and users usually come looking for that
+after being asked for a password when connecting, so they are kept and can be read again. A successful move into the keychain and the normal Windows
+case post nothing.
+
+| Situation | id (de-duplication) | Severity | Title |
+| --- | --- | --- | --- |
+| The key file in the data directory could not be unlocked (another system account, a reinstall, copied from another computer); it was renamed and kept, and a new key created | `master-key:replaced:<kept file name>`, once | Warning | "The local encryption key could not be used and was replaced"; the body names the kept file |
+| A key the data directory refers to is not in this computer's system keychain (data directory copied from elsewhere, entry deleted) | `master-key:missing:<ids…>`, once per set of ids | Warning | "A previous encryption key is not in the system keychain" |
+| The system keychain could not be opened this time (keyring locked, no session bus, authorization refused) | `master-key:unavailable:<date>`, once a day | Warning | "The system keychain is unavailable right now"; the body says the passwords are not lost and are read as usual on the next start once it is back |
+| Never migrated and the keychain is unusable, so the key stays in the data directory's key file | `master-key:file-fallback`, once | Info | "The encryption key is still stored in the data directory" |
+
+- No action link: the way back is re-entering the password in the login dialog when connecting (existing behaviour).
+- Posted in parallel with the update check, which may spend minutes downloading in the background, so these do not queue behind it; the periodic feed refresh does not post them again.
 
 ## 5. Storage and limits
 

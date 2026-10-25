@@ -134,6 +134,8 @@ The correct structure is two seams, each owning one layer:
                 └────────────────────────────────────────────────────────────────┘
 ```
 
+Seam A landed on 2026-10-25 (`IMasterKeyStore` + `MasterKeyResolver`; one implementation each for the macOS keychain and the Linux Secret Service, while Windows keeps the DPAPI-wrapped key file and has no `IMasterKeyStore` implementation); see the 2026-10-25 errata at the top of the [keychain research](system-keychain-and-sudo-credential-fill-feasibility-research.md).
+
 What "two entry points to the same thing as the system-keychain research" means concretely:
 
 - The **`IMasterKeyStore`** of the research's phases 0/1 protects the ciphertext **that VelaShell itself stores**; it and this document do not depend on each other and proceed in parallel.
@@ -836,7 +838,7 @@ Sources: [keepassxc-cli manual](https://github.com/keepassxreboot/keepassxc/blob
 
 ## 9. System keychain provider
 
-- **Phase 2**, depending on the `IMasterKeyStore` P/Invoke layer from phases 0/1 of the [keychain research](system-keychain-and-sudo-credential-fill-feasibility-research.md).
+- **Phase 2**. The P/Invoke layer from phases 0/1 of the [keychain research](system-keychain-and-sudo-credential-fill-feasibility-research.md) has landed for macOS / Linux (2026-10-25) and can be reused; the Windows provider needs its own `CredReadW` / `CredEnumerateW` (`IMasterKeyStore` has no Windows implementation — the local key there is a DPAPI-wrapped file).
 - **Windows first**: `CredEnumerateW` for search (filtered by TargetName), `CredReadW` to read `CRED_TYPE_GENERIC` entries; `ItemId` is the TargetName, the username comes from `UserName` and the password from `CredentialBlob` (UTF-16; whether every writer uses UTF-16 is **to be tested**).
 - No CLI runner and no unlock cache are needed.
 - Implementation details for macOS (`SecItemCopyMatching`) and Linux (libsecret) are settled together with the platform layer in §2 of the research document.

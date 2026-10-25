@@ -356,8 +356,8 @@ graph TD
     style E fill:#1d3557,color:#fff
 ```
 
-**敏感字段静态加密**：密码、私钥口令、同步令牌经 `ISecretProtector`（AES-256-GCM + 本地密钥文件
-`~/.velashell/secret.key`，密文前缀 `enc1:`）落盘。共享凭据（`shared_credentials`）的密码与私钥口令同样如此；
+**敏感字段静态加密**：密码、私钥口令、同步令牌经 `ISecretProtector`（AES-256-GCM + 本机加密密钥，密文前缀 `enc1:`）落盘；密钥 2026-10-25 起在 macOS / Linux 上存进系统密钥链
+（数据目录里只有条目清单 `~/.velashell/secret.key.ref`，密钥链用不了时才回落到 `~/.velashell/secret.key`），Windows 上是 DPAPI 包裹的 `secret.key`。共享凭据（`shared_credentials`）的密码与私钥口令同样如此；
 引用了共享凭据的连接配置（`CredentialSource` 非空），会话仓储在落盘那一刻把它的认证材料（密码、私钥路径、口令、
 证书路径）一律清掉 —— 放在仓储而不是各个保存点，是因为保存点有七八处，逐个防守迟早漏一个。
 
