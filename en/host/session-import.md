@@ -121,10 +121,13 @@ would import nothing at all.
 | `IdentityFile` | Private key path + `AuthMethod.PrivateKey` | `~` and `%d` `%u` `%h` `%r` `%%` are expanded by the SSH library (`SshHostConfig.ExpandIdentityFiles`, the same expansion used when reading keys to connect; 〔History〕the host used to expand them itself, recognizing only `~` / `%d` and leaving `%h` in the path as-is); relative paths are resolved against `~/.ssh`. **Existence is not checked** — the key may not have been copied over from the other machine yet, and carrying the path into the profile is more useful than dropping it silently; `none` counts as unset |
 | `ProxyJump` | Jump-host link (`JumpHostProfileId`) | See below |
 | `CertificateFile` | Certificate path + `AuthMethod.Certificate` | `CertificateFile` is set, or a `<key>-cert.pub` really exists on this machine next to an `IdentityFile` (OpenSSH reads that file too) → certificate authentication; nothing is guessed when it does not exist. The paired key: the `IdentityFile` named like the certificate (minus `-cert.pub`) first, otherwise the first one, and with none at all it is inferred from the certificate path by the naming convention. A VelaShell connection uses one authentication method, so extra keys are listed in the import notes |
-| `IdentityAgent` | `AuthMethod.Agent` | With no key and no certificate, pointing at the default agent (the one `SSH_AUTH_SOCK` names) → SSH agent authentication; `none` means no agent; pointing at a different agent socket is not imported (it goes into the import notes) |
+| `IdentityAgent` | `AuthMethod.Agent` + the connection's agent endpoint | With no key and no certificate → SSH agent authentication: pointing at the default agent (`SSH_AUTH_SOCK`, or a path equal to the local `SSH_AUTH_SOCK`) → the endpoint stays empty (system default); pointing at another path or named pipe usable on this computer → recorded as the connection's "SSH options → Agent endpoint" (since 2026-10-25; before, not imported); `none` means no agent; an unset `$VARIABLE` or another platform's path (`/run/user/…` on Windows) is not imported and goes into the import notes. With a key / certificate it does not decide the authentication method, but `ForwardAgent yes` forwards exactly this agent (see below). The endpoint is stored only when it is used (agent authentication or forwarding on) |
 | `KexAlgorithms` / `HostKeyAlgorithms` / `Ciphers` / `MACs` | The connection's custom algorithm lists | The `+` / `-` / `^` syntax comes across as written (a connection's custom lists use the ssh_config syntax anyway); names this version does not implement are dropped with a note, and a list that is misspelled, or empty once they are dropped, is not imported |
 | `Compression` | Compression | Carried over |
-| `ForwardAgent` | Agent forwarding | `yes` (or pointing at the default agent) is carried over; pointing at a different agent socket is not imported — VelaShell only forwards the default agent, and the config's author deliberately gave this host a different one, so swapping in the default would hand over more keys |
+| `ForwardAgent` | Agent forwarding | `yes` forwards the agent `IdentityAgent` points at (the system default when it is not set, as in OpenSSH); a path / `$VARIABLE`: the same agent authentication uses, or authentication not through an agent (key / certificate) → carried over with that endpoint; **authentication through an agent while forwarding names a different agent → forwarding is not imported** and goes into the import notes — VelaShell uses one agent per connection, and substituting the authentication one would hand over more keys; another platform's path or an unset variable is not imported |
+| `ForwardX11` | X11 forwarding | Only an explicit `yes` / `no` is taken; unset = no forwarding (VelaShell's default). An unrecognized value is not imported, with a note (since 2026-10-25; before, not imported at all) |
+| `ForwardX11Trusted` | Trusted (`-Y`) | Only an explicit `yes` / `no` is taken; **unset follows VelaShell's default (trusted)**, while OpenSSH treats unset as untrusted — a host with only `ForwardX11 yes` gets a preview note "imported as trusted (-Y) per VelaShell's default; OpenSSH would use untrusted (-X) here", rather than silently translating OpenSSH's default (the rule the maintainers set on 2026-10-25) |
+| `ObscureKeystrokeTiming` | Keystroke timing obfuscation | `yes` / `interval:N` (1–1000 ms) turn it on, `no` off; **unset = off** (OpenSSH defaults to on; not copied). VelaShell's interval is fixed at 20 ms, so an `interval:N` with N other than 20 gets a note; an unrecognized value is not imported |
 | `LocalForward` | Local forward tunnel | Each side may be a port or a Unix socket (a side containing `/` is a socket and goes into `LocalSocketPath` / `RemoteSocketPath`). With no listen address it binds 127.0.0.1 (0.0.0.0 with `GatewayPorts yes`); `*` means all interfaces |
 | `RemoteForward listen target` | Remote forward tunnel | Two TCP sides, or two sockets (the server listen path goes into `RemoteSocketPath`, the local target into `LocalSocketPath`); only one side a socket is skipped (the SSH library offers just these two combinations and the tunnel service refuses the mix too). With no listen address the server decides (loopback) |
 | `RemoteForward [address:]port` (no target) | Remote dynamic SOCKS tunnel (`RemoteDynamicForward`) | The listen address defaults to 127.0.0.1; the allow list comes from the host's `PermitRemoteOpen`; there is no remote dynamic forward on a socket, so that is skipped |
@@ -137,8 +140,7 @@ socket paths must be usable on this machine — a leading `~` is expanded, the p
 103 on macOS), and server paths must start with `/`; anything else is skipped. Lines are parsed one by one, so one bad line does not take
 others down with it.
 
-**Every other keyword is ignored**: `ServerAliveInterval`, `ForwardX11` (OpenSSH's `ForwardX11Trusted` default is not the same thing as
-VelaShell's "Trusted", so it is not forced into it), and so on. They either live somewhere else in VelaShell or the host does not support
+**Every other keyword is ignored**: `ServerAliveInterval` and so on. They either live somewhere else in VelaShell or the host does not support
 them yet. What the table above marks as skipped or not imported is not dropped silently: it goes into the row's **import notes** (section 4),
 so the user sees what did not come across and why.
 
@@ -169,7 +171,7 @@ in sync):
 | Password needed | The source holds a password that could not be decrypted (master password, a changed Windows account, …); the session still imports |
 | **Uses key file** | The session authenticates with a private key (from `IdentityFile`) |
 | **Uses certificate** | The session authenticates with a certificate (from `CertificateFile`, or the `-cert.pub` next to the key) |
-| **Uses SSH agent** | The session authenticates through the agent (from an `IdentityAgent` pointing at the default agent) |
+| **Uses SSH agent** | The session authenticates through the agent (from `IdentityAgent`: the default agent, or another endpoint usable on this computer) |
 | No password | The source never stored one |
 
 The last three states arrived with SSH config support: telling the user "no password" about a session
@@ -178,7 +180,8 @@ credential is of another kind.
 
 Below the name and address there may also be a grey line of **import notes**: how many tunnels the forwards became, and the settings
 that could not be mapped and were skipped (forwards on port 0 or with only one socket side, remote dynamic forwards without an allow list,
-other agent sockets, algorithms this version does not implement, extra keys), one per line.
+agent endpoints not usable on this computer, unset environment variables, a forwarding agent different from the authentication one, the trust-level difference
+when only `ForwardX11 yes` is written, the interval difference of `ObscureKeystrokeTiming interval:N`, unrecognized yes / no values, algorithms this version does not implement, extra keys), one per line.
 
 When a source has a master password enabled, the dialog shows one warning across the top:
 **passwords in a master-password vault cannot be recovered; only the sessions come across**.
@@ -260,7 +263,7 @@ line saying how many were added this way.
 }
 ```
 
-- Enums are written as names (`"privateKey"`), and numbers are accepted on read; CJK text is written as
+- Enums are written as names (`"privateKey"`), and numbers are accepted on read; key store authentication is written as `"authMethod":"keyStore"` (number `5`) with `keyStoreKey` (key store, key name, machine-level or not, and the public key line recorded when the key was picked; not a secret, plain text); CJK text is written as
   is rather than as `\u` escapes — this file is meant to be read and edited by people
 - Connections are `SessionProfile` serialized directly rather than a copied DTO: a copy is one more place
   where "remember to add the new field" can be forgotten, and the symptom is "a setting got lost after export
@@ -307,9 +310,9 @@ The exported CSV doubles as the template; the header is always:
 | `host` | host name or IP, **the only required column**. `user@host:port` and `[v6]:port` are split too, but only when the matching column is empty; a bare IPv6 address is not split, and a `[v6]` without a port just loses its brackets (profiles store the bare address). A user name / port split this way also applies when overwriting an existing connection (even without those columns) | the row is an error |
 | `port` | 1–65535 | SSH / SFTP 22, FTP 21 (implicit FTPS 990); required for plugin protocols |
 | `username` | user name | asked when connecting |
-| `auth` | `password` / `key` / `certificate` / `agent` / `tailscale` | certificate if one is given, key if a key is given, password otherwise. Always written on export (even when a shared credential is referenced), so a connection whose credential cannot be matched still comes back with its original method |
+| `auth` | `password` / `key` / `certificate` / `agent` / `tailscale` / `keystore` (`systemkeystore` / `cng` are accepted too; the system key store, since 2026-10-25) | certificate if one is given, key if a key is given, password otherwise. Always written on export (even when a shared credential is referenced), so a connection whose credential cannot be matched still comes back with its original method |
 | `password` | password, not trimmed (always empty on export) | not stored |
-| `private_key` / `certificate` | file path, not checked for existence | — |
+| `private_key` / `certificate` | file path, not checked for existence. With `auth=keystore`, `private_key` holds the reference to the key in the system key store, `cng:<key store>/<key name>` (machine-level: `cng-machine:`); anything else is an error; an overwriting CSV import updates it along with the key column | — |
 | `credential` | shared credential name or id; when set, the connection references it and the `auth` columns do not count, **except that `auth=tailscale` takes precedence and ignores this reference**. When the name is not unique locally, the one the duplicate local connection already references is used; otherwise none | its own authentication |
 | `jump_host` | jump host: another connection's name or id. Looked up in the file first, then on this computer; when the name is not unique locally, the one the duplicate local connection already jumps through is used, otherwise none (direct rather than wrong) | direct |
 | `tags` | separated by semicolons (`,` and `\|` work too) | — |
@@ -399,8 +402,10 @@ blocks that can be pasted straight into `~/.ssh/config`, so the command-line ssh
   rule in 7.1, and `ProxyJump` refers to them by alias.
 - **Aliases**: the connection name (the host when there is none), with whitespace and characters that mean something else in ssh_config
   replaced by `-`, and a number appended to duplicates.
-- **What is written**: `HostName` / `Port` / `User` / `IdentityFile` / `CertificateFile` / `ProxyJump` / `Compression` / `ForwardAgent` /
-  `ForwardX11` / the four algorithm lists / the three kinds of forward. Connections that use a shared credential get the credential's material
+- **What is written**: `HostName` / `Port` / `User` / `IdentityFile` / `CertificateFile` / `ProxyJump` / `Compression` / `IdentityAgent` (agent authentication with an endpoint set) /
+  `ForwardAgent` (with an endpoint set, the endpoint itself rather than yes) / `ForwardX11` and `ForwardX11Trusted` (with X11 on, the trust level is always written, since the defaults differ) /
+  `ObscureKeystrokeTiming yes` (**only when on**; off is not written as `no`: the keyword arrived in OpenSSH 9.5 and older versions reject a whole config with an unknown keyword, at the cost that a newer ssh then applies its own default, on) /
+  the four algorithm lists / the three kinds of forward. A connection using system key store authentication gets a `# cng:… (VelaShell: a Windows key store key; OpenSSH cannot use it as an IdentityFile)` comment instead of an `IdentityFile`. Connections that use a shared credential get the credential's material
   (a user name set on the connection wins, as when connecting). Paths under the home directory are written as `~/…`, so they still resolve on
   another machine.
 - **"Allow legacy algorithms"** has no ssh_config switch: a category without a custom list is written as `+legacy algorithms`; one written with
@@ -418,9 +423,5 @@ blocks that can be pasted straight into `~/.ssh/config`, so the command-line ssh
 
 - Exporting back to `~/.ssh/config` is done (7.7); `known_hosts` import and export live under Settings → Security & Audit → Trusted hosts (see
   the twentieth batch in [settings-audit.md](settings-audit.md)).
-- `IdentityAgent` / `ForwardAgent` pointing at a **non-default agent socket** are not imported: that needs a per-connection agent endpoint
-  setting first.
-- `ForwardX11` is not imported: OpenSSH's `ForwardX11Trusted` default and VelaShell's "Trusted (`-Y`)" follow different rules, and forcing one
-  onto the other would silently change the trust level.
 
 The rest is scheduled in [`feature-plan.md`](https://github.com/joesdu/VelaShell/blob/main/feature-plan.md) in the code repository.
