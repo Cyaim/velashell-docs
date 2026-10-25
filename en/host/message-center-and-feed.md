@@ -303,10 +303,10 @@ The timer ticks on a fixed half-hour, and the interval setting decides whether a
 
 ## 7. Not done yet
 
-- **Plugin-published notifications**: the SDK's `IUiApi` only has `ShowPanelAsync` today. The host-side
-  interface is already shaped for this (`commandId` navigation works for plugin-registered commands),
-  but actually opening it to plugins means changing the velashell-plugin-sdk repository, extending the
-  isolated-process IPC protocol, and going through the SDK release process — a separate batch.
+- **Plugin-published notifications**: the contract (`IUiApi.PostNotificationAsync`, `ui/notify`) is on velashell-plugin-sdk's dev, unpublished, and the host has not
+  wired it yet (see [SDK reference §3.7](../sdk/sdk-reference.md)); until then `IUiApi` only has `ShowPanelAsync`. The host-side interface is already shaped for this
+  (`commandId` navigation works for plugin-registered commands); what remains after the SDK release is on the host side: delivery on the in-process and
+  isolated routes, the 6-per-plugin-per-minute rate limit, per-plugin muting on the plugin management page, a source field on messages and per-plugin cleanup on uninstall.
 - **OS-level notifications** (Windows notification centre / macOS notifications): everything is in-app
   for now.
 - **Grouping and search**: with a 200-item cap, the "Unread" filter is enough for the moment.

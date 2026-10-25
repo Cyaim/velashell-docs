@@ -54,7 +54,7 @@ public interface IRemoteFs
 
 ### 2.1 独立上传任务（SDK 2.1.1）
 
-`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
+`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。登记之前就被明确拒绝的（源不存在、被占用、额度满、空间不够）将来以 `PluginTransferRejectedException` 交回（SDK TBD，尚未发布，宿主尚未改抛；见 [SDK §3.3e](../sdk/sdk-reference.md)）。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
 
 当前宿主每插件上传与下载合计最多 4 项实际传输并行、32 项活动/排队任务，保留最多 1024 条生命周期幂等回执；满额明确拒绝新任务，同 id 重取已有回执不受活动额度阻挡。这是资源并发预算，不是文件大小上限。
 
@@ -187,6 +187,10 @@ public interface ITimeSeries
 VelaUI 表面(面板与文档页)、对话框(Message/Confirm/Input/QuickPick)、
 应用内通知(频控:每插件 ≤6 条/min)、进度指示(状态栏/通知内)。
 
+> 应用内通知的实际契约(SDK TBD,尚未发布,宿主尚未接):`IUiApi.SupportsNotifications` / `PostNotificationAsync(PluginNotification)`,
+> 返回 `Posted` / `AlreadyPosted` / `Muted` / `RateLimited`;按 id 先去重后限频(每插件每分钟 6 条),只收要留存、可回看的消息,
+> 动作只能是本插件的命令,没有网址字段。详见 [SDK §3.7](../sdk/sdk-reference.md)。
+
 ## 8. vela.events — 宿主事件订阅(S5)
 
 权限:事件本体多数随对应域权限(如会话事件随 `sessions.read`);
@@ -275,6 +279,7 @@ S3/S4/S5 的域全部可用。
 | `ProtocolFeatures` | `Permissions` / `ServerSideCopy` / `ResumeUpload` / `ResumeDownload` / `AnonymousAccess` / `CertificateTrust` |
 | 异常族 | `ProtocolAuthenticationException` / `ProtocolCertificateTrustException` / `ProtocolConnectionException` / `ProtocolUnsupportedException` |
 | 清单贡献 | `contributes.protocols` + `onProtocol:<协议id>` 惰性激活 |
+| 可选兼实现(SDK TBD,尚未发布) | `IProtocolLastWriteTime`(改修改时间)、`IProtocolChecksum`(只用服务器自己给的摘要,`RemoteChecksumAlgorithm`);`RemoteFileEntry` 加 `IsSymbolicLink` / `LinkTarget`。见 [SDK §3.3d](../sdk/sdk-reference.md) |
 | `PluginManifestReader.IsValidProtocolId` | 协议 id 的权威判定(全小写 `[a-z0-9.-]`、≤128、须以插件 id 为前缀);清单校验与运行期注册共用,避免两边口径分叉 |
 
 设计取舍:

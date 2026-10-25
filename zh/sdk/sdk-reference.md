@@ -154,6 +154,25 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 检查实际长度、传输前后远端元数据，并使用可用的摘要能力；不强制纯 SFTP 账号提供 exec，也不默认第二遍整文件下载。检测源变化则失败，但这些检查**不是远端原子快照保证**。提交用例在 Windows 与 Linux（WSL Debian 的 ext4 与 tmpfs）上实际跑过，macOS 只经 CI；这不是真实 SSH/GUI 整链验证。AI 生命周期与终态通知见 [自动化与 AI §1.7](../plugins/11-automation-and-ai.md#17-ai-双入口后台下载sdk-212)。
 
+### 3.3d 插件协议的文件能力补口（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，不代表宿主已经接上。** 契约已写进 velashell-plugin-sdk 的 dev，版本号由发布者决定；不修改版本横幅、不制作下游使用的本地包。正式包发布后，宿主中央依赖抬上去，再接 `PluginProtocolFileService`（链接字段、改修改时间、摘要）与 `RemoteFsCapability.Map`。全部只增不改，`apiLevel` 不变。
+
+- `RemoteFileEntry` 新增两个 `init` 属性（八参构造与 `Deconstruct` 不变）：`IsSymbolicLink` 按 lstat 判断；`IsDirectory`、`Size`、`LastModified` 描述链接**目标**，断链保留链接自身的属性；`LinkTarget` 是 readlink 的原文，可以是相对路径。隔离进程的 `fs/list`、`fs/stat` 现有 JSON 自动带上这两个字段，旧数据缺字段时读成「不是链接」。
+- `IProtocolLastWriteTime`（可选，与 `IProtocolStreamUpload` 一样由协议实现类兼实现）：`SetLastWriteTimeAsync(sessionId, path, DateTimeOffset lastWriteTime, ct)`。
+- `IProtocolChecksum`（可选，兼实现）：`ComputeChecksumsAsync(sessionId, RemoteChecksumAlgorithm algorithm, IReadOnlyList<string> paths, ct)` 返回 `IReadOnlyDictionary<string, string?>` —— 键就是请求里的路径，值是小写十六进制，单个文件算不出时为 null。**只能用服务器自己给出的摘要**，不许为了凑一个值把整个文件读回来算。`RemoteChecksumAlgorithm` 为 `Unknown = 0`、`Sha256`、`Sha512`、`Sha1`、`Md5`。
+- 「不支持」怎么报：协议不实现这两个接口，宿主就如实报不支持；实现了但这条会话做不到（服务器没有 MFMT 或 HASH）时抛 `ProtocolUnsupportedException`。这两个接口只给 `inProcess` 的协议用（协议本来就只支持 `inProcess`），没有新增 RPC。
+- 范围外：插件协议上**创建**符号链接仍然没有契约，宿主的 `CreateSymbolicLinkAsync` 照旧报不支持。
+
+### 3.3e 传输启动前被拒（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，宿主尚未改抛它。** 版本号由发布者决定，不修改版本横幅。
+
+- `PluginTransferRejectedException`（派生自 `InvalidOperationException`，刻意不是 `IOException`；sealed）带 `Reason`（`RemoteTransferRejectReason`：`Unknown = 0`、`SourceNotFound`、`SourceInUse`、`QuotaExceeded`、`InsufficientSpace`）。RPC 错误码 `RpcErrorCodes.TransferRejected = "transfer-rejected"`，线上格式 `transfer-rejected:source-in-use`，不认识或缺失的后缀还原成 `Unknown`；`FromException` 里排在 `InvalidOperationException` 之前。
+- 宿主抛它就等于保证：任务没有登记、没有生成 transferId、没有读写任何内容、OperationId 也没有记进账本。条件变了之后可以再试（同一个 OperationId 不会撞上「参数不符」），但不要紧接着自动重试。
+- 与另外两种结局分开处理：「结果未知」只能用同一个 OperationId 去重取回执；「用户拒绝」（`PluginPermissionDeniedException`）重试没有意义。参数非法、平台不支持、会话不在、OperationId 参数冲突照旧用原来的异常类型。`IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` 补了 `<exception>` 说明。
+- 当前宿主（发版前）对这几种登记前的拒绝仍抛原来的类型（例如快照空间不够是 `Failed` / `insufficient-space` 的快照，§3.3b）。
+
 ### 3.4 界面与扩展点
 
 | 能力                                | 关键方法                                      | 说明                                                                                                                |
@@ -250,6 +269,43 @@ Icon = PluginIcon.Filled(RedisLogoPathData, viewBoxSize: 1030)
 > ⚠️ 与 `PanelTitleAction.IconPathData` **不是一回事**。那个画的是**窗口标题栏**上的动作按钮,
 > 恒为 24×24 描边,没有填充与视框可言(见[开发指南 §5.9](../templates/dev-guide.md))。
 
+### 3.7 往消息中心发通知（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，宿主尚未实现。** 契约已写进 velashell-plugin-sdk 的 dev，版本号由发布者决定，不修改版本横幅。正式包发布后，宿主再实现进程内 `PluginUiApi` 与隔离模式的 `ui/notify` 路由、限频、按插件静音、消息来源与卸载清理；在那之前 `SupportsNotifications` 为 false。
+
+```csharp
+if (ctx.Ui.SupportsNotifications)
+{
+    PluginNotificationOutcome outcome = await ctx.Ui.PostNotificationAsync(new PluginNotification
+    {
+        Id = "backup-failed:web-01",          // 本插件内稳定的去重键
+        Title = "备份失败",
+        Body = "web-01 的夜间备份没有完成。",
+        Level = PluginNotificationLevel.Warning,
+        ActionCommandId = "acme.backup.open", // 只能是本插件的命令
+        ActionLabel = "查看",
+    });
+}
+```
+
+- `PluginNotification`（record）：`Id` 必填，本插件内稳定的去重键，1–128 字符、不能有控制字符；`Title` 必填、纯文本，宿主超过 200 字截断；`Body` 纯文本，超过 1000 字截断；`Level`（`Info` / `Warning` / `Critical`，与宿主的轻重一一对应）；
+  `ActionCommandId` 只能是本插件的命令（以 `"<pluginId>."` 开头），`ActionLabel` 有命令才能给；`Validate(pluginId)` 是宿主、PluginHost 与测试替身共用的同一套校验。**故意没有网址字段，也没有「发送方」字段**。
+- `IUiApi.SupportsNotifications`（默认 false）与 `PostNotificationAsync(notification, ct)`（默认实现抛 `NotSupportedException`）都有默认实现，现有实现照旧能编译。返回 `PluginNotificationOutcome`：`Unknown = 0`、`Posted`、`AlreadyPosted`、`Muted`、`RateLimited`。
+- 约定：消息中心只收**要留存、可回看**的消息，进度、运行时状态、操作回执、调试信息不该往这里发（[消息中心与资讯源](../host/消息中心与资讯源.md) §1）。先去重、后限频：同一个 id 重投返回 `AlreadyPosted`，不算频率；每个插件每分钟最多 6 条新消息（宿主可以收得更紧），超出返回 `RateLimited`、不抛异常；用户按插件静音时返回 `Muted`。消息跨重启保留，受消息中心总量上限约束；插件卸载时宿主删掉它发的消息；插件不能改写或撤回已发的消息。动作命令最好写进清单的 `contributes.commands`，插件没激活时点击也能惰性激活。
+- 权限：不新增权限项 —— 普通权限 `ui.contributions` 本来就包含「通知（有频控）」（[06 §1](../plugins/06-permission-system.md)）；`notifications.system` 管的是操作系统通知，与这个无关。用户的控制手段在宿主侧：插件管理页的按插件静音。
+- 隔离进程：RPC `ui/notify`（`UiNotifyRequest` / `UiNotifyResponse`），握手 `HandshakeResponse.SupportsNotifications` 缺席时为 false（[IPC §7.4](../plugins/05-ipc-protocol.md)）。
+- 测试替身 `FakeUi`：`SupportsNotifications`（默认 true）、`NotificationRequests`（全部投递）、`PostedNotifications`（实际入列的）、`NotificationOutcome` 脚本（模拟限流与静音）、`PluginId`；校验与去重规则与宿主一致，`TestPluginContext` 把自己的 PluginId 同步给它。
+
+### 3.8 版本比较 `SemanticVersion`（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约。** 宿主、CLI 与商店各自的版本比较会在包发布后改用它；在那之前各处照旧。
+
+- `VelaShell.PluginSdk.Versioning.SemanticVersion`（readonly struct）：`Major` / `Minor` / `Patch` / `Revision`（第四段，没有时为 0）、`PreRelease` / `BuildMetadata`（永不为 null）、`IsPreRelease`；`TryParse` / `Parse`（不合法抛 `FormatException`）。
+- `CompareTo` 按完整的 SemVer 2.0 §11 优先级：`beta.2 < beta.10`，纯数字标识符按长度再按序数比、任意长度不溢出，纯数字低于含字母的，含字母的按 ASCII 序数、区分大小写，前面都相同时标识符多的更高；构建元数据保留但不参与比较（`Equals` / `GetHashCode` 同一口径）。
+  `CompareCoreTo` 只比数字段，给 `minSdkVersion` / 最低宿主版本这类装载闸用；`TextComparer` 比较版本字符串，解析不出的当最旧、同优先级按原文序数。
+- 解析时数字段沿用宿主与 `plugin.json` 的宽松写法（允许前缀 `v`、两段或四段、数字段前导零），后缀严格按 SemVer：标识符不能为空、只含 `[0-9A-Za-z-]`，预发布里的纯数字标识符不能有前导零。
+  所以清单正则放行而它判为不合法的写法有 `1.0.0-beta.01`、`1.0.0-a..b`（要不要收紧清单校验另定）。
+
 ---
 
 ## 4. 清单(`plugin.json`)
@@ -330,7 +386,7 @@ public async Task Activate_RegistersCommand()
 
 可用替身:`CollectingLogger`、`InMemoryStorage`、`InMemoryTimeSeries`、`FakeSessions`、
 `FakeRemoteFs`、`FakeRemoteExec`、`FakeRemoteTunnel`、`FakeTerminal`、`FakeTerminalViewApi`、
-`FakeUi`、`FakeSecrets`、`FakeClipboard`、`RecordingCommands`、`RecordingProtocols`、
+`FakeUi`（SDK TBD 起另有通知成员，见 §3.7）、`FakeSecrets`、`FakeClipboard`、`RecordingCommands`、`RecordingProtocols`、
 `RecordingWorkspaces`、`TestHostEvents`、`TestHostInfo`。
 
 `FakeSessions` 除了 `AddConnected` 还有 `AddSaved`(造一条已保存配置)与三个钩子:

@@ -158,6 +158,25 @@ The host uses a dedicated per-download lease checking remote read/local write, w
 
 Actual length, remote metadata before/after transfer and available digests are checked. Pure SFTP accounts are not required to support exec; a second full download is not the default. Detected source changes fail, but these checks **do not guarantee an atomic remote snapshot**. The commit tests have actually run on Windows and Linux (ext4 and tmpfs under WSL Debian), macOS only through CI; this is not real SSH/GUI end-to-end validation. See [Automation and AI §1.7](../plugins/11-automation-and-ai.md#17-dual-entry-background-ai-downloads-sdk-212) for lifecycle and terminal notification behavior.
 
+### 3.3d File capabilities for plugin protocols (SDK TBD, replace at release time)
+
+**This is an unpublished SDK contract, not a claim that the host has wired it up.** The contract is on velashell-plugin-sdk's dev; the publisher chooses the version; do not change the version banner or build local packages for downstream repositories. After the official package is published, the host's central dependencies are raised and `PluginProtocolFileService` (link fields, setting modification times, digests) and `RemoteFsCapability.Map` are wired. Everything is additive; `apiLevel` is unchanged.
+
+- `RemoteFileEntry` gains two `init` properties (the eight-argument constructor and `Deconstruct` are unchanged): `IsSymbolicLink` is decided by lstat, while `IsDirectory`, `Size` and `LastModified` describe the link's **target** (a broken link keeps the link's own attributes); `LinkTarget` is readlink's raw text and may be relative. The existing `fs/list` / `fs/stat` JSON of isolated processes carries both automatically, and old data without them reads as "not a link".
+- `IProtocolLastWriteTime` (optional, implemented alongside like `IProtocolStreamUpload`): `SetLastWriteTimeAsync(sessionId, path, DateTimeOffset lastWriteTime, ct)`.
+- `IProtocolChecksum` (optional, implemented alongside): `ComputeChecksumsAsync(sessionId, RemoteChecksumAlgorithm algorithm, IReadOnlyList<string> paths, ct)` returns `IReadOnlyDictionary<string, string?>` — keyed by the requested paths, values in lowercase hex, null for a file that could not be computed. **Only digests the server produces itself may be returned**; reading a whole file back to make one up is not allowed. `RemoteChecksumAlgorithm` is `Unknown = 0`, `Sha256`, `Sha512`, `Sha1`, `Md5`.
+- How "unsupported" is reported: when a protocol does not implement these interfaces, the host reports unsupported; when it does but this session cannot (no MFMT or HASH on the server), it throws `ProtocolUnsupportedException`. Both interfaces are for `inProcess` protocols only (protocols support only `inProcess` anyway), so no RPC is added.
+- Out of scope: **creating** symbolic links on plugin protocols still has no contract, and the host's `CreateSymbolicLinkAsync` still reports unsupported.
+
+### 3.3e Transfers refused before they start (SDK TBD, replace at release time)
+
+**This is an unpublished SDK contract; the host does not throw it yet.** The publisher chooses the version; do not change the version banner.
+
+- `PluginTransferRejectedException` (derives from `InvalidOperationException`, deliberately not `IOException`; sealed) carries `Reason` (`RemoteTransferRejectReason`: `Unknown = 0`, `SourceNotFound`, `SourceInUse`, `QuotaExceeded`, `InsufficientSpace`). The RPC error code is `RpcErrorCodes.TransferRejected = "transfer-rejected"`, on the wire `transfer-rejected:source-in-use`; an unknown or missing suffix restores as `Unknown`; it comes before `InvalidOperationException` in `FromException`.
+- Throwing it guarantees that the job was not registered, no transferId was created, nothing was read or written, and the OperationId was not recorded in the ledger. A plugin may try again once conditions change (the same OperationId will not hit "arguments differ"), but should not retry automatically right away.
+- Keep it apart from the other two outcomes: "result unknown" can only be resolved by fetching the receipt again with the same OperationId; "user denied" (`PluginPermissionDeniedException`) is pointless to retry. Invalid arguments, unsupported platforms, missing sessions and OperationId argument conflicts keep their existing exception types. `IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` gained `<exception>` documentation.
+- The current host (before the release) still throws the old types for these pre-registration refusals (for example, too little snapshot space is a `Failed` / `insufficient-space` snapshot, §3.3b).
+
 ### 3.4 UI and extension points
 
 | Capability                          | Key methods                                          | Notes                                                                                                                                                      |
@@ -265,6 +284,43 @@ Three things that bite:
 > button on a **window title bar**, is always a 24×24 stroke glyph, and has no notion of fill or
 > view box (see [the development guide §5.9](../templates/dev-guide.md)).
 
+### 3.7 Posting to the message center (SDK TBD, replace at release time)
+
+**This is an unpublished SDK contract; the host has not implemented it.** The contract is on velashell-plugin-sdk's dev; the publisher chooses the version; do not change the version banner. After the package is published, the host implements the in-process `PluginUiApi` and the isolated `ui/notify` route, rate limiting, per-plugin muting, the message source and cleanup on uninstall; until then `SupportsNotifications` is false.
+
+```csharp
+if (ctx.Ui.SupportsNotifications)
+{
+    PluginNotificationOutcome outcome = await ctx.Ui.PostNotificationAsync(new PluginNotification
+    {
+        Id = "backup-failed:web-01",          // a de-duplication key, stable within this plugin
+        Title = "Backup failed",
+        Body = "The nightly backup of web-01 did not finish.",
+        Level = PluginNotificationLevel.Warning,
+        ActionCommandId = "acme.backup.open", // must be one of this plugin's commands
+        ActionLabel = "View",
+    });
+}
+```
+
+- `PluginNotification` (record): `Id` is required, a de-duplication key stable within this plugin, 1–128 characters without control characters; `Title` is required plain text, truncated by the host past 200 characters; `Body` is plain text, truncated past 1000; `Level` (`Info` / `Warning` / `Critical`, mapping one to one onto the host's severities);
+  `ActionCommandId` must be one of this plugin's commands (starting with `"<pluginId>."`), and `ActionLabel` is allowed only with a command; `Validate(pluginId)` is the one validation shared by the host, PluginHost and the test doubles. **There is deliberately no URL field and no "sender" field.**
+- `IUiApi.SupportsNotifications` (default false) and `PostNotificationAsync(notification, ct)` (default implementation throws `NotSupportedException`) both have default implementations, so existing implementations still compile. It returns `PluginNotificationOutcome`: `Unknown = 0`, `Posted`, `AlreadyPosted`, `Muted`, `RateLimited`.
+- Conventions: the message center takes only messages **worth keeping and reading again**; progress, runtime state, operation receipts and debugging output do not belong there ([message center and feed](../host/message-center-and-feed.md) §1). De-duplication comes before rate limiting: posting the same id again returns `AlreadyPosted` and does not count; each plugin may post at most 6 new messages a minute (the host may be stricter), beyond which it returns `RateLimited` without throwing; when the user has muted the plugin it returns `Muted`. Messages survive restarts within the message center's overall cap; uninstalling a plugin deletes its messages; a plugin cannot edit or withdraw a posted message. Action commands are best declared in the manifest's `contributes.commands`, so clicking works even before the plugin is activated.
+- Permissions: no new permission — the ordinary `ui.contributions` already includes "notifications (rate limited)" ([06 §1](../plugins/06-permission-system.md)); `notifications.system` is about operating-system notifications and unrelated. The user's control lives on the host side: per-plugin muting on the plugin management page.
+- Isolated processes: RPC `ui/notify` (`UiNotifyRequest` / `UiNotifyResponse`), with the handshake's `HandshakeResponse.SupportsNotifications` false when absent ([IPC §7.4](../plugins/05-ipc-protocol.md)).
+- Test double `FakeUi`: `SupportsNotifications` (default true), `NotificationRequests` (every post), `PostedNotifications` (the ones actually queued), a `NotificationOutcome` script (to simulate rate limiting and muting) and `PluginId`; validation and de-duplication match the host, and `TestPluginContext` passes its PluginId on to it.
+
+### 3.8 Version comparison `SemanticVersion` (SDK TBD, replace at release time)
+
+**This is an unpublished SDK contract.** The host, the CLI and the marketplace switch their own version comparisons to it once the package is published; until then each keeps its own.
+
+- `VelaShell.PluginSdk.Versioning.SemanticVersion` (readonly struct): `Major` / `Minor` / `Patch` / `Revision` (the fourth part, 0 when absent), `PreRelease` / `BuildMetadata` (never null), `IsPreRelease`; `TryParse` / `Parse` (throws `FormatException` when invalid).
+- `CompareTo` follows the full SemVer 2.0 §11 precedence: `beta.2 < beta.10`, numeric identifiers compare by length then ordinally without overflow at any length, numeric identifiers rank below alphanumeric ones, alphanumeric ones compare in ASCII order case-sensitively, and with everything else equal more identifiers rank higher; build metadata is kept but not compared (`Equals` / `GetHashCode` agree).
+  `CompareCoreTo` compares only the numeric parts, for load gates such as `minSdkVersion` / the minimum host version; `TextComparer` compares version strings, treating unparseable ones as oldest and ordering equal precedence by the raw text.
+- Parsing keeps the lenient numeric parts the host and `plugin.json` allow (an optional `v` prefix, two or four parts, leading zeros in numeric parts), while suffixes follow SemVer strictly: no empty identifiers, only `[0-9A-Za-z-]`, and no leading zeros in numeric prerelease identifiers.
+  So `1.0.0-beta.01` and `1.0.0-a..b` pass the manifest regex but are invalid here (whether to tighten manifest validation is a separate decision).
+
 ---
 
 ## 4. Manifest
@@ -351,7 +407,7 @@ public async Task Activate_RegistersCommand()
 
 Available doubles: `CollectingLogger`, `InMemoryStorage`, `InMemoryTimeSeries`, `FakeSessions`,
 `FakeRemoteFs`, `FakeRemoteExec`, `FakeRemoteTunnel`, `FakeTerminal`, `FakeTerminalViewApi`,
-`FakeUi`, `FakeSecrets`, `FakeClipboard`, `RecordingCommands`, `RecordingProtocols`,
+`FakeUi` (with notification members from SDK TBD on, see §3.7), `FakeSecrets`, `FakeClipboard`, `RecordingCommands`, `RecordingProtocols`,
 `RecordingWorkspaces`, `TestHostEvents`, `TestHostInfo`.
 
 Besides `AddConnected`, `FakeSessions` offers `AddSaved` (build a saved configuration) and three hooks:
