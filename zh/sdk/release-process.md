@@ -120,14 +120,16 @@
 
 ### 版本号的落点(由脚本统一维护)
 
-拆库之后本仓库只剩四处:
+拆库之后只剩四处,其中两处在 velashell-docs:
 
 | 落点 | 漏改的后果 |
 | --- | --- |
 | `Directory.Build.props` 的 `VelaSdkVersion` | 包版本不对 |
 | `src/VelaShell.PluginSdk/VelaPluginApi.cs` 的 `SdkVersion` | **什么都不会报错**,只是 `vela-plugin doctor` 从此汇报一个错的宿主 SDK 版本,插件的 `minSdkVersion` 门槛跟着判错 |
-| `docs/sdk-reference.md` 版本横幅 | 给人照抄的过期数字 |
-| `docs-en/sdk-reference.md` 版本横幅 | 同上 |
+| velashell-docs 的 `zh/sdk/sdk-reference.md` 版本横幅 | 给人照抄的过期数字 |
+| velashell-docs 的 `en/sdk/sdk-reference.md` 版本横幅 | 同上 |
+
+最后两处在另一个仓库,是**可选**落点:脚本按 `-DocsRoot` / `$env:VELASHELL_DOCS` / 同级 `../velashell-docs` 找到它才改,找不到就跳过并警告。
 
 跑 `pwsh scripts/Set-Version.ps1 <版本>` 一次全改。CI 用 `-Check` 做体检。
 

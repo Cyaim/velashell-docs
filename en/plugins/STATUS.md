@@ -95,6 +95,20 @@ Quality baseline (full regression each round): full-repository build with 0 warn
 4. Define the `vela.ai` capability-domain interface alongside the AI plugin (blueprint 11);
 5. Add sidebar/status-bar mount points (the final contribution points before building the UI ecosystem).
 
+## 2026-08: the protocols capability domain lands
+
+- The SDK gained `VelaShell.PluginSdk.Protocols` (apiLevel stays at 1; purely additive):
+  `IProtocolFileSystem` / `IProtocolsApi` / `ProtocolDescriptor` / the protocol exception family;
+  the manifest gained `contributes.protocols` and the `onProtocol:` activation event.
+- The host gained `PluginProtocolRegistry` (declare → register → lazy activation → unregister) and
+  `PluginProtocolFileService` (adapts `IProtocolFileSystem` to the host's remote-file contract,
+  and takes care of progress throttling and exception translation).
+- First user: the official **S3 plugin** (`plugins/VelaShell.Plugin.S3`). Built-in S3 support moved out of the host entirely —
+  the AWSSDK dependency, the 22-field bucket configuration UI and 149 strings all go with the plugin; `ConnectionType` no longer
+  names any concrete protocol, only a single `Plugin`. See [S3 protocol plugin design](../host/s3-protocol-plugin-design.md).
+- Known boundary: the protocols capability is `inProcess` only (isolated-process RPC does not yet support requests in the
+  host → plugin direction).
+
 ## 2026-08: SDK productization (NuGet packages / templates / dedicated package format / debugging loop)
 
 The plugin SDK went from "in-repository projects consumed via ProjectReference" to a real,
