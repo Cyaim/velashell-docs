@@ -29,7 +29,11 @@ Code like that silently breaks when a library upgrade changes a single word of t
 〔Decision〕**Kinds finer than the reason code come out as `*Kind` enums, whose zero value is always `Unknown` (not classified)**:
 `SshChannelException.FailureKind` (`SshChannelFailureKind`), `ProblemKind` on the private key and certificate exceptions
 (`SshKeyProblemKind`), `SshAuthDetailKind` in the authentication attempt record ([04 §3.4](04-authentication.md)) and the host
-certificate's `HostCertificateProblemKind` ([03 §5.5](03-key-exchange.md)), each together with its parameters (path, algorithm name, Key ID,
+certificate's `HostCertificateProblemKind` ([03 §5.5](03-key-exchange.md)), the connect exception's `SshConnectException.FailureKind` (`SshConnectFailureKind`: where a host key
+rejection came from, which step of a proxy or jump host failed — §2, §5.2), `SshForwardException.FailureKind` for a forwarder that cannot start
+(`SshForwardFailureKind`, [07 §8](07-forwarding.md)), the agent's `SshAgentException.FailureKind` (`SshAgentFailureKind`), `SftpUnavailableException.FailureKind`
+when SFTP cannot start (`SftpUnavailableKind`, [06 §1](06-sftp.md)), plus `SftpException.MissingExtensions` (which extension is missing) and the parameters
+of `ForwardErrorEventArgs` ([07 §5](07-forwarding.md)), each together with its parameters (path, algorithm name, Key ID,
 limit …). Callers write their UI wording by kind; `Message` remains Chinese text written for developers, with no promise of stable wording.
 
 〔Decision〕**Text from the peer is sanitized before it goes into `Message`**: control characters (`ESC`, `CR`, `BEL`, …), `DEL`, C1 control codes and bidirectional text controls
@@ -97,6 +101,14 @@ exception leaves the library) and `AlgorithmName`; certificates also carry `KeyI
 when they do not pair, so a UI can show fingerprints). The dozens of "the file is broken" variants are merged into `Malformed`, with the
 details left in the inner message. `SshChannelException` carries `FailureKind` (`SshChannelFailureKind`) and `ChannelType` /
 `SubsystemName` / `Limit`; the kinds are in [05 §2.3](05-connection.md).
+`SshConnectException` carries `FailureKind` (`SshConnectFailureKind`) and `Via` (the jump host / proxy / ProxyCommand command line) / `Target` (`host:port` text) / `HostKeyType` /
+`HostKeyAlgorithm` / `HostKeyBits` / `MinimumHostKeyBits` / `ProxyReplyCode` / `ProxyReply` (the host key type and the HTTP status line come from the peer, unsanitized);
+`SshForwardException` for a forwarder that cannot start carries `FailureKind` (`SshForwardFailureKind`) and `Endpoint` / `Port` / `Limit` / `Timeout` / `DisplayName` / `ExitCode` /
+`ErrorOutput` (xauth's stderr, sanitized) / `ConfigLine`; `SshAgentException` carries `FailureKind` (`SshAgentFailureKind`) and `Endpoint` / `PipeOwner` (the named pipe owner's SID) /
+`RequestedAlgorithm` / `SignedAlgorithm` (from the agent, unsanitized) / `HasDestinationConstraints`; `SftpUnavailableException` carries `FailureKind` (`SftpUnavailableKind`) and `ServerVersion`.
+Each enum lives in its own domain folder, the connect one in `Diagnostics/` (the foundation depends on no other folder, so its parameters are all strings and integers);
+exception types and `Reason` are unchanged, so callers that `catch` by type are unaffected. A TCP dial failing with a socket error the library does not recognize
+still has reason code `Unknown`, with kind `TcpConnectFailed` and `Target`; the error code is in the inner `SocketException`.
 
 Reading a private key, reading a certificate and parsing a public key happen outside any connection (there may be no connection at all), so `Phase` is `None`.
 When parsing the peer's host key fails during key exchange, the key exchange wraps it into an `SshConnectException` with `Reason` `HostKeyRejected`.
@@ -106,7 +118,11 @@ a refused exec / pty-req / shell was reported as `ChannelOpenFailed` (the channe
 Callers could then only parse the message sentence —— and the message is diagnostic text for developers, not UI copy, with no promise of stable wording.
 If no suitable value exists, add one instead of borrowing a similar one; only when the exception type itself corresponds to a single kind of failure is the reason fixed in the type (the first table above).
 
-A rejected host key has no dedicated type: it is an `SshConnectException` with `Reason` `HostKeyRejected`, and the policy's reason is its `Message` (§3).
+A rejected host key has no dedicated type: it is still an `SshConnectException` with `Reason` `HostKeyRejected` / `HostKeyChanged`, and **`FailureKind` separates the library's own rejections from the policy's**:
+`HostKeyMalformed` (`K_S` cannot be parsed) / `HostKeyAlgorithmMismatch` (its type string does not match the negotiated algorithm) / `HostKeyTooShort` (RSA below the minimum, `HostKeyBits` /
+`MinimumHostKeyBits`) / `HostKeySignatureInvalid` (the signature over the exchange hash does not verify) happen before the policy is asked, and the message is the library's;
+with `HostKeyPolicyRejected` the `Message` is exactly the reason the policy gave (the library does not rewrite it); `HostKeyPolicyRejectedWithoutReason` means the policy returned an unfilled verdict (`default`).
+〔Decision〕Callers used to have to assume that "every `HostKeyRejected` message was written by the policy", so a failed signature check showed the library's Chinese text in the UI.
 
 〔Decision〕**Public APIs throw only the exceptions of this hierarchy.** Something from the peer that cannot be parsed (a truncated name list in KEXINIT, a frame with an empty payload) is handled the same way during the handshake and authentication
 as during the session: `SshProtocolException` (`ProtocolError`, with `Phase` set to the step where it happened); a peer that disconnects in the middle of a packet is an `SshConnectionClosedException`
@@ -296,6 +312,12 @@ yet today they look exactly the same.
 `SshHopInfo` has at least `Kind` (`Tcp` / `Socks5` / `HttpConnect` / `SshJump` / `ProxyCommand`),
 `Target`, `Succeeded`, `Elapsed`, `Detail`.
 The filling rules (nearest to farthest, inner entries preserved as-is) are in `09-dialing.md` §2.2.
+
+〔Decision〕**`FailureKind` says which step of the proxy or jump host failed**: the proxy cannot be reached, the handshake timed out, the connection dropped mid-handshake, the host name does not fit the request, the SOCKS5 credentials are too long,
+the SOCKS5 version byte / method / address type / reply code (`ProxyReplyCode`), an HTTP reply that is not HTTP / headers too large / a status code (`ProxyReplyCode` and the status line `ProxyReply`),
+ProxyCommand exiting before connecting (`ProxyReplyCode` the exit code, `ProxyReply` the end of stderr); a jump host that cannot be reached, a connect time-out, a refusal to forward, a failure while forwarding,
+a forwarding time-out (`Via` is the jump host, `Target` the destination) — each kind is listed in `09-dialing.md` §2.2, §3, §4, §5 and §6.
+When `DialHops` rewraps an exception only to add hop information, the original kind and parameters are carried over unchanged. Callers word their messages by kind instead of parsing sentences.
 
 〔Decision〕When an HTTP CONNECT proxy refuses port 22, **give a suggestion directly in the message**
 ("the proxy may only allow 80/443; please use SOCKS5 or a direct connection instead").

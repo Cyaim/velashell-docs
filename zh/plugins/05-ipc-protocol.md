@@ -178,6 +178,18 @@ SDK 契约、严格发送/半帧失败回归，以及正式 SDK 2.1.0 装配后�
 
 下载契约已随 SDK 2.1.2 正式发布到 NuGet.org，宿主中央包、AI 显式依赖与 minSdk 均为 2.1.2；下载有自己的回归用例，不拿上节的上传回归结论代替。安全提交支持 Windows 固定本地 NTFS 与 Linux/macOS（x64、arm64）的本地文件系统，UNC/9p/SMB/FUSE/NFS 等其它文件系统明确拒绝，不回退旧 API。完整边界见 [SDK §3.3c](../sdk/sdk-reference.md#33c-独立下载任务sdk-212)。
 
+### 7.4 待发版的几处补口（SDK TBD，发版时替换）
+
+**以下是已写进 velashell-plugin-sdk dev、尚未发布的契约，宿主尚未接。** 版本号由发布者决定。
+
+- **`ui/notify`**（`PluginRpc.UiNotify`，`UiNotifyRequest(PluginNotification)` / `UiNotifyResponse(PluginNotificationOutcome)`）：隔离插件往消息中心发通知。握手 `HandshakeResponse.SupportsNotifications` 缺席时为 false，
+  这时 PluginHost 在插件进程里直接抛 `NotSupportedException`；支持时先本地校验再发请求。语义见 [SDK §3.7](../sdk/sdk-reference.md)。
+- **错误码 `transfer-rejected:<原因>`**（`RpcErrorCodes.TransferRejected`）：传输在登记之前就被明确拒绝（源不存在、被占用、额度满、空间不够），还原成 `PluginTransferRejectedException`，后缀认不出时原因为 `Unknown`。见 [SDK §3.3e](../sdk/sdk-reference.md)。
+- **一帧要么整帧写完、要么不开始**（`RpcConnection.WriteAsync`，公开 API 不变）：调用方的取消令牌只管排队等写闸 —— 拿到写闸之前取消，这一帧一个字节都不写；拿到之后流写入一律不再看调用方的令牌，
+  这时取消，调用方立即收到 `OperationCanceledException`，帧在后台照样写完整，对端仍会执行这条请求（与 §7.1「请求帧不随调用方取消」同一口径）。写到一半失败，整条连接作废：排在后面的写入一个字节都不再写，
+  在途请求全部失败、触发断开、释放连接 —— 普通的 `NotifyAsync` 对单条通知仍是尽力而为，但不再带着半帧继续用这条连接（此前只有 `NotifyExecutionAsync` 这样做，§7.1）。排队等写闸的调用也响应连接关闭，以 `ObjectDisposedException` 退出
+  （`RequestAsync` 里表现为 `RpcDisconnectedException`），不再一直挂着。宿主与 PluginHost 不必改代码，抬了包版本就生效。
+
 ## 8. 开发计划(本分项)
 
 | 任务 | 说明 | 依赖 | 估算 |

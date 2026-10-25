@@ -63,6 +63,10 @@ sequenceDiagram
 与它在 stderr 上说的最后一段（`ServerErrorOutput`，按对端文本清洗、换行收成一行）。SFTP 通道照旧丢弃 stderr，只是留住最后 1 KiB 当线索；
 退出状态常在 EOF 之后才到，最多再等 2 秒。〔历史〕曾经报「SFTP 通道在还有在途请求时就关闭了」，退出码与那句原话都丢了 —— 而那是唯一的线索。
 
+〔决策〕**握手失败的几种用 `SftpUnavailableException.FailureKind`（`SftpUnavailableKind`）分开**：`subsystem` 请求被拒 `SubsystemRejected`、
+握手超时 `HandshakeTimeout`、sftp-server 在 `VERSION` 之前退出 `ServerExited`、服务端版本太低 `VersionTooOld` / 太高 `VersionTooNew`（后两种带 `ServerVersion`，§九），
+本端已收工 `SessionClosed`（§5.4）。原因码照旧；使用者据此说「版本太低」「本端已关闭」，而不是一律说成「服务端没开 SFTP」。
+
 ---
 
 ## 二 SFTP 报文的外层结构
@@ -439,7 +443,7 @@ flowchart LR
 | 通道正常结束（对端发了 EOF / CLOSE，例如 sftp-server 退出；或通道在本端被关掉） | `SftpTransferInterruptedException`。流水线这一层不知道写到了哪里，它的 `DurableLength` 是 0；文件流在 `FlushAsync` / 关闭时会换成带本流精确 `DurableLength` 的那一个（§6.2），原因挂在内层 |
 | 连接断了 | 通道读端交出来的连接故障，原样（本端释放连接时是 `ObjectDisposedException`） |
 | 收到畸形帧（长度超上限、放不下 `request-id`，§9） | `SshProtocolException`（`ProtocolError`） |
-| 本端释放 `SftpFileSystem`（连同流水线） | `SftpUnavailableException` |
+| 本端释放 `SftpFileSystem`（连同流水线） | `SftpUnavailableException`（原因码照旧 `Unsupported`，种类 `SessionClosed` —— 是本端收工，不是服务端不支持） |
 
 还没拿到 id 的调用方 —— 排在在途额度或发送锁上等着的 —— 也要**一起放出来**：拿到上表的那个故障；
 释放时的竞态下也可能是 `ObjectDisposedException`。在途额度只有应答才还得回来，而收工之后不会再有应答；不放的话，
@@ -633,7 +637,7 @@ UI 线程上是界面卡住一个 RTT，线程池上并发一多就是饿死。�
 
 | 扩展 | 用途 | 没有时的行为 |
 | --- | --- | --- |
-| `posix-rename@openssh.com` | **原子**重命名（覆盖目标），`RenameAsync(..., overwrite: true)` | 抛 `SftpException`（`OperationUnsupported`），**不退化** —— 普通 `SSH_FXP_RENAME` 在目标存在时失败，悄悄退化等于换了语义；「先删目标再改名」不是原子的，由调用方自己决定要不要 |
+| `posix-rename@openssh.com` | **原子**重命名（覆盖目标），`RenameAsync(..., overwrite: true)` | 抛 `SftpException`（`OperationUnsupported`，`MissingExtensions` 是它），**不退化** —— 普通 `SSH_FXP_RENAME` 在目标存在时失败，悄悄退化等于换了语义；「先删目标再改名」不是原子的，由调用方自己决定要不要 |
 | `hardlink@openssh.com` | 建硬链接 | 抛 `Unsupported` |
 | `fsync@openssh.com` | 强制落盘 | 抛 `Unsupported` |
 | `limits@openssh.com` | §5.2；宣告了 `max-open-handles` 就按它排队：每个开着的文件、目录占一个额度，关了还回来，额度用完时新的 `OPEN` / `OPENDIR` 等着，而不是撞上服务端的上限得到一个随机的「操作失败」 | 用保守默认；句柄不限 |
@@ -643,6 +647,10 @@ UI 线程上是界面卡住一个 RTT，线程池上并发一多就是饿死。�
 | `expand-path@openssh.com` | 展开 `~`：`ExpandPathAsync(路径)` 把 `~`、`~/…`、`~用户名`、`~用户名/…` 整条交给服务端（顺带规范化，已与真 OpenSSH 的 `$HOME` 核对）；不以 `~` 开头的等同 `GetRealPathAsync`。`REALPATH` 本身不展开 `~` | `~`、`~/…` 用登录时的工作目录拼、再 `REALPATH`；`~用户名` 改用 `home-directory` |
 | `lsetstat@openssh.com` | 设属性但**不跟随**符号链接（`touch -h` / `chown -h`）：`SetLinkAttributesAsync`，同步目录时保留链接自身的时间戳 | 抛 `Unsupported`（看 `HasLSetStat`），**不退化**成跟随链接的 `SETSTAT` —— 那会改到目标 |
 | `users-groups-by-id@openssh.com` | 把数字 uid / gid 翻成名字：`LookupUserAndGroupNamesAsync(uid 们, gid 们)`，与问的一一对应、不认识的为 `null`（线上是空串，已与真 OpenSSH 的 `id` 核对）。请求是两个 `string`，各装着一串 `uint32`；应答是两个 `string`，各装着一串 `string`。回的条数对不上报格式不对（不让名字错位安到别的 id 上）；一次最多各 4096 个 | 抛 `Unsupported`（看 `HasUsersGroupsById`）；宿主照旧显示数字 |
+
+〔决策〕**服务端没宣告扩展时本库自己报的 `OperationUnsupported` 带上缺的扩展名**：`ServerMessage` 为空（服务端什么都没说），缺的在 `SftpException.MissingExtensions` ——
+`posix-rename`、`hardlink`、`statvfs`、`copy-data`、`lsetstat`、`users-groups-by-id` 各一个，`ExpandPathAsync("~用户名")` 是 `expand-path@openssh.com` 与 `home-directory` 两个。
+使用者据此在「不支持这个操作」后面说出是哪一个（覆盖式改名另说「先删再改名不是原子的」），不解析消息。
 
 〔决策〕**按句柄设时间**（v3 的 `FSETSTAT`，不是扩展）：`SftpFileStream.SetTimesAsync(访问时间, 修改时间)` 在关闭之前用同一个句柄设，
 一次往返；`SetLastWriteTimeAsync(路径, …)` 要先 `STAT` 取回访问时间再 `SETSTAT`（两者共用一个标志位，只给一个会把另一个抹成 1970 年），两次往返。
@@ -726,8 +734,8 @@ SftpCapabilities Capabilities { get; }
 | handle 超过 256 字节 | `ProtocolError`（draft-02 规定的上限） |
 | 收到未知 `request-id` 的应答 | 〔决策〕忽略 + debug 日志（可能是已取消请求的迟到应答，§5.3） |
 | 收到未知报文类型 | `ProtocolError`（SFTP 层没有 `UNIMPLEMENTED` 机制） |
-| 服务端 version > 3 | 〔决策〕**拒绝**，`SftpUnavailableException`（`ProtocolError`）：draft-02 §4 要求服务端回双方版本里较小的那个，我们发的是 3；回得更大的服务端要么有缺陷、要么会按自己的版本说话（v4 起 ATTRS 结构不同），按 v3 解析就是静默错位。〔历史〕曾经降到 3 继续 |
-| 服务端 version < 3 | 〔决策〕**拒绝**，抛 `SftpUnsupportedVersion`。v0–v2 差异过大，不值得支持 |
+| 服务端 version > 3 | 〔决策〕**拒绝**，`SftpUnavailableException`（`ProtocolError`，种类 `VersionTooNew`，带 `ServerVersion`）：draft-02 §4 要求服务端回双方版本里较小的那个，我们发的是 3；回得更大的服务端要么有缺陷、要么会按自己的版本说话（v4 起 ATTRS 结构不同），按 v3 解析就是静默错位。〔历史〕曾经降到 3 继续 |
+| 服务端 version < 3 | 〔决策〕**拒绝**，抛 `SftpUnavailableException`（`Unsupported`，种类 `VersionTooOld`，带 `ServerVersion`）。v0–v2 差异过大，不值得支持 |
 | `READ` 返回的数据多于请求的 length | `ProtocolError` |
 | `READDIR` 返回的 `count` 与实际项数不符 | `ProtocolError` |
 | 应答载荷格式不对（字段截断、长度越界等） | 〔决策〕抛公开的 `SshProtocolException`（`ProtocolError`），**不让内部的解析异常漏出去** —— 那是内部类型，使用者按类型接不住它。只影响这一次调用：解析在调用方的路径上做，流水线照常可用 |

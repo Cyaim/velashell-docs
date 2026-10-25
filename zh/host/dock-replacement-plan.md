@@ -105,8 +105,13 @@ Docking/
 
 - `DockWorkspace.Root : DockNode` —— 初始为单个 `DockGroup`(`IsPrimary=true`)。
 - **结构操作**(全部在模型层,可单测):
-  - `AddDocument(doc)`:放进最合适的窗格并激活。落点三级:**空窗格 > 当前正在用的窗格 > 主组**
-    (2026-09-10 起;原为“总进主组”,分屏后会把新标签开在人没在看的那半边)。
+  - `AddDocument(doc, target = null)`:放进最合适的窗格并激活。落点先后(2026-10-25 起):给了 `target` 且还在树上就落进那一格;
+    否则当前异步流程带着 `TargetNewDocumentsAt` 的票据时落进票据那一格;再否则 `PlacementResolver`;最后是默认三级:**空窗格 > 当前正在用的窗格 > 主组**
+    (默认三级 2026-09-10 起;原为“总进主组”,分屏后会把新标签开在人没在看的那半边)。
+  - `TargetNewDocumentsAt(group) : IDisposable`(2026-10-25 起,为标签条「+」而设):在 `AsyncLocal` 里挂一张「落进这一格」的票据,
+    新建连接对话框与连接流程一个参数都不用加 —— 票据顺着 `await` 传下去,流程里建的**第一个**文档认领它;一张票只用一次,释放即作废
+    (流程里另起的后台任务之后建的东西拿不到),别的流程(自动重连、布局模板还原)看不到。那一格已不在树上时按默认规则落。
+    放在模型层而不是宿主:`PlacementResolver` 已被布局模板还原器占着,两者不会同时出现在一条流程里,票据先于它。
   - `RemoveDocument(doc)`:静默移除(连接失败撤标签路径),空组折叠。
   - `CloseDocument(doc)`:尊重 `CanClose` → 移除 → 触发 `DocumentClosed`。
   - `CloseOthers/All/Left/Right(doc)`:逐个走 `CloseDocument`(保证 SSH 清理链完整)。

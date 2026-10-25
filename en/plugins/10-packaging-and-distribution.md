@@ -118,6 +118,8 @@ the same format on their internal network to support internal distribution):
   "revokedPublishers": ["ed25519:..."] }
 ```
 
+> Current state (2026-10-25): in-app plugin updates use https only, and the marketplace's download ticket must give the package's `fileSha256` (64 hex digits); when it is missing, or the marketplace / download address is http, the download is refused before any request is sent. After downloading the digest is checked, and installing still verifies the signature.
+
 **Stage B, official marketplace**: a dynamic service (search, download counts,
 ratings, publisher portal, and automated scanning), to be funded only once the
 ecosystem reaches sufficient scale; the index format remains forward-compatible

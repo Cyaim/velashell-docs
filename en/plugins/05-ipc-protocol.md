@@ -147,6 +147,18 @@ Get/wait/cancel, authenticated plugin ownership, the lifetime `OperationId` ledg
 
 The download contract is officially published in SDK 2.1.2 on NuGet.org; host central packages, the explicit AI reference and minSdk all use 2.1.2. Downloads have their own regression tests; the upload regression results above are not used in their place. Safe commit supports Windows fixed local NTFS and local filesystems on Linux/macOS (x64, arm64); UNC/9p/SMB/FUSE/NFS and other filesystems fail explicitly without a legacy API fallback. See [SDK §3.3c](../sdk/sdk-reference.md#33c-independent-download-jobs-sdk-212).
 
+### 7.4 Pending additions (SDK TBD, replace at release time)
+
+**These contracts are on velashell-plugin-sdk's dev but unpublished, and the host has not wired them.** The publisher chooses the version.
+
+- **`ui/notify`** (`PluginRpc.UiNotify`, `UiNotifyRequest(PluginNotification)` / `UiNotifyResponse(PluginNotificationOutcome)`): an isolated plugin posting to the message center. The handshake's `HandshakeResponse.SupportsNotifications` is false when absent,
+  in which case PluginHost throws `NotSupportedException` inside the plugin process; when supported it validates locally first, then sends the request. Semantics in [SDK §3.7](../sdk/sdk-reference.md).
+- **Error code `transfer-rejected:<reason>`** (`RpcErrorCodes.TransferRejected`): a transfer explicitly refused before registration (source missing, in use, quota full, not enough space), restored as `PluginTransferRejectedException`, with an unknown suffix giving `Unknown`. See [SDK §3.3e](../sdk/sdk-reference.md).
+- **A frame is written whole or not at all** (`RpcConnection.WriteAsync`, public API unchanged): the caller's cancellation token only covers waiting in line for the write gate — cancelled before acquiring it, not a byte of the frame is written; once acquired, stream writes no longer look at the caller's token,
+  so a cancellation then returns `OperationCanceledException` to the caller at once while the frame is still written completely in the background and the peer still executes the request (the same rule as "request frames are not cancelled with the caller" in §7.1). A failure halfway through a frame retires the whole connection: queued writes write nothing more,
+  in-flight requests all fail, the disconnect fires and the connection is disposed — a plain `NotifyAsync` is still best-effort per notification, but never keeps using a connection with half a frame on it (before, only `NotifyExecutionAsync` did this, §7.1). Calls waiting for the write gate also react to the connection closing and leave with `ObjectDisposedException`
+  (`RpcDisconnectedException` inside `RequestAsync`) instead of hanging. The host and PluginHost need no code change; raising the package version is enough.
+
 ## 8. Development Plan (This Work Item)
 
 | Task | Description | Dependency | Estimate |

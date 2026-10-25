@@ -54,15 +54,15 @@ public interface IRemoteFs
 
 ### 2.1 独立上传任务（SDK 2.1.1）
 
-`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
+`IRemoteFsApi` 增加 `SupportsTransferOperations` 和 `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`，完整契约见 [SDK §3.3b](../sdk/sdk-reference.md#33b-独立上传任务sdk-211)。登记之前就被明确拒绝的（源不存在、被占用、额度满、空间不够）将来以 `PluginTransferRejectedException` 交回（SDK TBD，尚未发布，宿主尚未改抛；见 [SDK §3.3e](../sdk/sdk-reference.md)）。它与上方同步传输不同：启动返回任务快照，内容继续由宿主按流上传，单次查询/等待超时不取消传输，不把旧两小时 RPC 时限当执行死线。
 
 当前宿主每插件上传与下载合计最多 4 项实际传输并行、32 项活动/排队任务，保留最多 1024 条生命周期幂等回执；满额明确拒绝新任务，同 id 重取已有回执不受活动额度阻挡。这是资源并发预算，不是文件大小上限。
 
-本地源的父目录别名先逐组件解析，审批与任务快照显示已验证源句柄对应的实际路径；末级文件链接、不支持的平台句柄验证或不可解析路径明确拒绝。Windows 上只有名字代理类重解析点（符号链接、目录联接、挂载点）算链接，OneDrive 云文件占位符这类过滤器标记不算；打开后按句柄核验最终路径仍是真正的防线。重复启动仍以原请求参数去重，不因别名改向重新打开文件。
+本地源的父目录别名先逐组件解析，审批与任务快照显示解析后的路径；末级文件链接、不支持的平台句柄验证或不可解析路径明确拒绝。Windows 上只有名字代理类重解析点（符号链接、目录联接、挂载点）算链接，OneDrive 云文件占位符这类过滤器标记不算。打开之后按**文件身份**核验句柄就是这个路径上的文件（Windows 卷序列号 + 文件 id，`FILE_ID_INFO`，取不到时两边一起退到 `BY_HANDLE_FILE_INFORMATION`；Linux statx 的 dev + inode；macOS fstat 的 st_dev + st_ino），核验那一端不经任何链接走到：Windows 逐级钉住祖先目录，不许有名字代理；Linux 从 `/` 起逐级 `openat(O_NOFOLLOW)`；macOS 用 `fstatat(AT_SYMLINK_NOFOLLOW_ANY)`。这是真正的防线。映射盘、subst 盘、硬链接名与大小写 / 规范化变体按同一个文件放行，查不出身份一律拒绝（2026-10-25 起；此前逐字比句柄的最终路径）。重复启动仍以原请求参数去重，不因别名改向重新打开文件。
 
-新上传 API 使用独立的宿主可信确认与单任务授权租约：展示插件、真实会话、本地源、远端目标及覆盖策略，只有批准当前任务或拒绝，不沿用终端/开会话授权。缺少授权闸/提示器/桌面窗口时拒绝；等待确认不阻塞启动 RPC。撤销插件权限会取消待批准及活动上传、阻止后续提交并隐藏新的任务元数据，已进入提交的不确定结果仍按 `Unknown` 处理，不承诺回滚。AI 的 `Bypass` 只跳插件审批，不能绕过该宿主确认。
+新上传 API 使用独立的宿主可信确认与单任务授权租约：展示插件、真实会话、本地源、**文件大小**、远端目标及覆盖策略，只有批准当前任务或拒绝，不沿用终端/开会话授权。缺少授权闸/提示器/桌面窗口时拒绝；等待确认不阻塞启动 RPC。撤销插件权限会取消待批准及活动上传、阻止后续提交并隐藏新的任务元数据，已进入提交的不确定结果仍按 `Unknown` 处理，不承诺回滚。AI 的 `Bypass` 只跳插件审批，不能绕过该宿主确认。
 
-进度采用 64 位字节计数、单调快照序号、执行代次和明确终态。已写满仍可能正在远端收尾；只有 `Succeeded` 是成功。远端临时文件是目标同目录下的 `.vela-up-<16 位十六进制>`；开始写之前先做提交预检，要覆盖而服务端没有 `posix-rename`、不覆盖而目标已存在时直接失败（`ErrorCode` 分别为 `not-supported` / `commit-rejected`），不传完一整份才被拒，提交仍是唯一权威。覆盖提交把被替换普通文件的权限位带到新文件上，属主尽力而为，setuid / setgid 只在属主属组对上之后才带；带不过去又会放宽权限时拒绝提交、目标不动。取消必须指定执行代次，恢复必须重新审批、核对连接身份/源对象/检查点及最终提交结果；不能自动重传不确定副作用。新方法默认明确不支持，能力位 false 时不退回同步大文件上传。这里的契约不等于通用权限 Broker 已实现，实际可用权限与生命周期边界必须按宿主实现说明解读。
+进度采用 64 位字节计数、单调快照序号、执行代次和明确终态。已写满仍可能正在远端收尾；只有 `Succeeded` 是成功。远端临时文件是目标同目录下的 `.vela-up-<16 位十六进制>`；开始写之前先做提交预检，要覆盖而服务端没有 `posix-rename`、不覆盖而目标已存在时直接失败（`ErrorCode` 分别为 `not-supported` / `commit-rejected`），不传完一整份才被拒，提交仍是唯一权威。覆盖上传的临时文件一建出来就按被替换普通文件的 0777 权限位新建（服务端照常减 umask；目标是个条目却读不出模式时按 0600；读不到目标就按服务端默认，提交时照旧把关），写入期间不比原文件宽；setuid / setgid / 粘滞位与属主仍由提交补上。覆盖提交把被替换普通文件的权限位带到新文件上，属主尽力而为，setuid / setgid 只在属主属组对上之后才带；带不过去又会放宽权限时拒绝提交、目标不动。取消必须指定执行代次，恢复必须重新审批、核对连接身份/源对象/检查点及最终提交结果；不能自动重传不确定副作用。新方法默认明确不支持，能力位 false 时不退回同步大文件上传。`ErrorCode` `insufficient-space`：Linux / macOS 的源快照所在卷空间不够（详见 [自动化与 AI §1.6](11-automation-and-ai.md)）。停止宽限期 30 秒；断线记 `Failed` / `session-disconnected`，表示确认停写、目标没写入。这里的契约不等于通用权限 Broker 已实现，实际可用权限与生命周期边界必须按宿主实现说明解读。
 
 ### 2.2 独立下载任务（SDK 2.1.2）
 
@@ -86,7 +86,7 @@ public interface IRemoteFs
 
 普通与 sudo 流共享每插件 4 条流上限，接收器应同步快速转发，不用 `Progress<T>` 打乱输出顺序。接收器慢了不会中断执行，只会让远端输出跟着慢下来：隔离插件的通知队列满时宿主等它腾出位置，背压经 SSH 窗口传回远端；进程内插件本就在读行线程上同步回调。普通流无换行长输出按最多 4096 字符分片，CR 可分段，超长行带 `[VelaShell: continued]`，因此不要依赖一条回调等于一条完整应用记录。sudo 输出与普通流一样把非 UTF-8 字节替换为 U+FFFD，GBK 日志、二进制内容或非 UTF-8 文件名不会让在跑的 root 命令变成 Unknown。
 
-**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传/下载 API 提供各自专用单任务租约（§2.1/§2.2），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
+**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传/下载 API 提供各自专用单任务租约（§2.1/§2.2），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。确认框弹出后「批准」先灰约 0.6 秒（从窗口打开起算，2026-10-25 起），取消随时可点，回车与初始焦点仍在取消上 —— 防的是用户正打字时顺手一个回车批掉 root 命令。
 
 AI 插件的提权审批与宿主确认是两层：`Ask` / `ReadOnlyAuto` 使用独立 `run_command_elevated` 类型、展示目标及整条 root 范围且不设 RepeatKey；缺少审批 Handler 即拒绝，root `cat` 也不能按只读自动放行。用户明确选择 `Bypass` 只跳过插件审批，绝不跳过宿主确认。MCP 无 Handler 时前两模式拒绝，Bypass 可以请求桌面宿主确认。
 
@@ -187,6 +187,10 @@ public interface ITimeSeries
 VelaUI 表面(面板与文档页)、对话框(Message/Confirm/Input/QuickPick)、
 应用内通知(频控:每插件 ≤6 条/min)、进度指示(状态栏/通知内)。
 
+> 应用内通知的实际契约(SDK TBD,尚未发布,宿主尚未接):`IUiApi.SupportsNotifications` / `PostNotificationAsync(PluginNotification)`,
+> 返回 `Posted` / `AlreadyPosted` / `Muted` / `RateLimited`;按 id 先去重后限频(每插件每分钟 6 条),只收要留存、可回看的消息,
+> 动作只能是本插件的命令,没有网址字段。详见 [SDK §3.7](../sdk/sdk-reference.md)。
+
 ## 8. vela.events — 宿主事件订阅(S5)
 
 权限:事件本体多数随对应域权限(如会话事件随 `sessions.read`);
@@ -275,6 +279,7 @@ S3/S4/S5 的域全部可用。
 | `ProtocolFeatures` | `Permissions` / `ServerSideCopy` / `ResumeUpload` / `ResumeDownload` / `AnonymousAccess` / `CertificateTrust` |
 | 异常族 | `ProtocolAuthenticationException` / `ProtocolCertificateTrustException` / `ProtocolConnectionException` / `ProtocolUnsupportedException` |
 | 清单贡献 | `contributes.protocols` + `onProtocol:<协议id>` 惰性激活 |
+| 可选兼实现(SDK TBD,尚未发布) | `IProtocolLastWriteTime`(改修改时间)、`IProtocolChecksum`(只用服务器自己给的摘要,`RemoteChecksumAlgorithm`);`RemoteFileEntry` 加 `IsSymbolicLink` / `LinkTarget`。见 [SDK §3.3d](../sdk/sdk-reference.md) |
 | `PluginManifestReader.IsValidProtocolId` | 协议 id 的权威判定(全小写 `[a-z0-9.-]`、≤128、须以插件 id 为前缀);清单校验与运行期注册共用,避免两边口径分叉 |
 
 设计取舍:

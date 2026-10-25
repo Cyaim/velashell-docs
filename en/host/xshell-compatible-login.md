@@ -107,13 +107,19 @@ A second launch with no arguments (double-clicking the icon, or launching while 
 
 The rule for one-time credentials is that they never touch disk:
 
-- the profile built from a request has `RememberPassword = false` and is **never written to the session repository**
-  (it does not show up in the session tree);
-- the "recent connections" history only records host / port / user / duration — it never stored passwords;
+- the profile built from a request has `RememberPassword = false`. The temporary profile put together when the request
+  carries credentials, or when no saved profile for the same target can be reused, is **never written to the store**: the
+  connection workflow writes back only profiles that already exist there (since 2026-10-25; before, it landed in the session
+  tree as a profile without the password once connected and was uploaded by cloud sync), so it does not appear in the session
+  tree, is not synced, and is not restored on the next start; the tab opens and reconnects after a drop as usual. Ticking
+  "Remember password" in the login dialog of such a connection saves nothing;
+- the "recent connections" history only records host / port / user / duration — it never stored passwords; reopening from
+  there asks for the credentials again;
 - `ExternalLaunchRequest.ToString()` deliberately omits the password, because that string can end up in a `Trace` log
   at any time;
 - when a request carries no credentials, a **saved profile for the same target** is reused, so your own stored
-  password or key applies exactly as if you had clicked the sidebar entry.
+  password or key applies exactly as if you had clicked the sidebar entry; reusing it updates that profile's last-connected
+  time as usual.
 
 ## 6. Security analysis
 
@@ -127,7 +133,7 @@ from somebody else**. Risks and mitigations, item by item:
 | A malicious page forging an `ssh://` link that points at an attacker-controlled host | Yes | The dialog shows the target verbatim, and scheme registration is off by default — without it, that entry point does not exist |
 | Another user on the machine sniffing or hijacking the forwarding channel | Yes | `CurrentUserOnly` named pipe (Windows ACL / Unix 0700 plus owner check) |
 | The one-time secret leaking into settings, logs or synced data | Yes | See the four guarantees above |
-| External launches bypassing host-key verification | Yes | They do not — external launches reuse the same connection pipeline, so first-fingerprint confirmation and the fingerprint-change decision still apply |
+| External launches bypassing host-key verification | Yes | They do not — external launches reuse the same connection pipeline, so first-fingerprint confirmation and the fingerprint-change decision still apply; first-connection confirmation is on by default (since 2026-10-25) |
 | A caller-supplied tab label posing as another host (the tab says "prod-db" but the connection goes elsewhere) | Yes | The label is display only and never reaches the profile, the audit log or the trust decision; to see which host it really is, look at the target in the confirmation dialog and at the status bar — both show the real target |
 
 **Recommendations for administrators**

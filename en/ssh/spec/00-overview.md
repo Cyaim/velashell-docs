@@ -133,13 +133,14 @@ Details of each algorithm are in [`03-key-exchange.md`](03-key-exchange.md); thi
 | `ecdh-sha2-nistp256/384/521` | RFC 5656 | ✅ | |
 | `diffie-hellman-group14-sha256` | RFC 8268 | ✅ | |
 | `diffie-hellman-group16-sha512` | RFC 8268 | ✅ | |
+| `diffie-hellman-group18-sha512` | RFC 8268 | ✅ | MODP 8192-bit. After group16 and before group14: a server offering both ends up with group16 (8192-bit modular exponentiation is several times slower), and group18 is chosen only when it is the only one in common; also in `FipsApprovedOnly` (§6.6) |
 | `diffie-hellman-group-exchange-sha256` | RFC 4419 | ✅ | 〔Interop〕old devices and hardened servers often offer only this. Placed after the elliptic curves and before the DH standard groups; the group is supplied by the server and must be checked (03 §3.5) |
 | `diffie-hellman-group14-sha1` | RFC 4253 | ❌ off by default | 〔Interop〕Cisco IOS / old VRP have only this. **MUST be explicitly enabled by the user** (§6.6) |
 | `ext-info-c` / `kex-strict-c-v00@openssh.com` | RFC 8308 / OpenSSH | ✅ | Not real algorithms but **indicators**; see 03 |
 
 The default list is ordered `mlkem768x25519-sha256`, `mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`,
 `sntrup761x25519-sha512`, `sntrup761x25519-sha512@openssh.com`, `curve25519-sha256`, `curve25519-sha256@libssh.org`,
-`ecdh-sha2-nistp256/384/521`, `diffie-hellman-group-exchange-sha256`, `diffie-hellman-group16-sha512`, `diffie-hellman-group14-sha256`.
+`ecdh-sha2-nistp256/384/521`, `diffie-hellman-group-exchange-sha256`, `diffie-hellman-group16-sha512`, `diffie-hellman-group18-sha512`, `diffie-hellman-group14-sha256`.
 
 〔Decision〕**The two NIST-curve ML-KEM hybrids are in the default list**, placed as follows:
 
@@ -227,14 +228,15 @@ in preference order: the default list first, legacy algorithms after) and which 
 Consumers that let users write their own lists use it to say on the spot "not implemented" versus "not recognized". It shares one source of truth with the validation above and with the factory tables, checked name by name in the tests.
 〔History〕Without this catalog the host inferred what was implemented from `Default.WithLegacyInterop()` and maintained its own hand-written "known but unimplemented" list.
 
-〔Decision〕**A list of FIPS-approved algorithms only**: `SshAlgorithmSet.FipsApprovedOnly`, matching what RHEL's FIPS crypto policy allows for SSH —
-key exchange first the two FIPS-oriented post-quantum hybrids, then ECDH on the NIST curves and the standard DH groups, host keys only ECDSA and SHA-2 RSA (with their certificates), encryption only AES-GCM / AES-CTR,
+〔Decision〕**A list of FIPS-approved algorithms only**: `SshAlgorithmSet.FipsApprovedOnly`. Key exchange, host key and MAC algorithms are the same set as the RHEL 10.2 FIPS crypto policy for OpenSSH (the lists crypto-policies gives OpenSSH);
+encryption additionally has `aes192-ctr` (AES-192 is equally FIPS 197 approved; RHEL does not enable it). The order follows this library's rules rather than the policy's —
+key exchange first the two FIPS-oriented post-quantum hybrids, then ECDH on the NIST curves, group exchange and the standard DH groups, host keys only ECDSA and SHA-2 RSA (with their certificates), encryption only AES-GCM / AES-CTR,
 MACs only HMAC-SHA2; no X25519, Ed25519 or ChaCha20-Poly1305, and no post-quantum hybrids built on X25519 or sntrup761. **It only restricts the algorithms; it does not make this library FIPS 140 validated**:
 AES, SHA-2, ECDH, ECDSA and RSA go through the BCL (the validated CNG on Windows; elsewhere it depends on the system's OpenSSL), ML-KEM goes through the BCL when the platform supports it (`MLKem.IsSupported`)
 and otherwise, like the modular exponentiation of the DH groups, through BouncyCastle.
 
 Its key exchange list is, in order: `mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`, `ecdh-sha2-nistp256/384/521`,
-`diffie-hellman-group16-sha512`, `diffie-hellman-group14-sha256`.
+`diffie-hellman-group-exchange-sha256`, `diffie-hellman-group16-sha512`, `diffie-hellman-group18-sha512`, `diffie-hellman-group14-sha256`.
 
 〔Decision〕**The two NIST-curve ML-KEM hybrids (03 §3.7) come first in this list.** They use only FIPS-approved primitives (ML-KEM, ECDH on P-256 / P-384, SHA-2),
 and RFC 10042 Appendix B takes the view that its way of combining them appears to be an approved derivation (NIST SP 800-227 does not name it); the list RHEL 10.2's FIPS policy gives sshd has exactly these two first and ECDH after them.
@@ -243,6 +245,8 @@ A server that does not support them still ends up with `ecdh-sha2-nistp256`, as 
 
 〔History〕At first this preset did not include these two hybrids: there was no server to check the wire format against yet, so an implementation could only vouch for itself.
 On 2026-10-06 a verification target was found (AlmaLinux 10.2's OpenSSH 9.9p1, with RHEL 10.2's downstream patch, has both) and the draft had been published as RFC 10042, so they were added (03 §3.7).
+
+〔History〕It used to lack group exchange and group18 (group18 was not implemented yet) while claiming to match RHEL; in 2026-10 the gap was closed against the policy files on the AlmaLinux 10.2 target.
 
 ## 7 How algorithm priority is ordered
 

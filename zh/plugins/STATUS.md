@@ -72,7 +72,7 @@ AI / Redis 面板另有 headless 装载与交互测试。
 | 能力域:terminal(读/搜/授权回写) | 07 | 缓冲快照读取+正则搜索;回写经授权闸(仅本次/本会话/始终/拒绝,始终持久 SonnetDB)+ 输入串行化队列 | PluginPermissionGateTests、HelloWorldTerminalTests |
 | 能力域:remoteFs 流式读取 | 07 | `OpenReadAsync` 顺序流;隔离模式 RPC 分块(openRead/streamRead/close,EOF 自动释放) | StreamingRoutingTests |
 | 插件管理页 | 02/06 | 侧栏插件图标 → 自绘卡片窗口(与资源监视同规格:min/max/close+缩放):列表/状态/启停/**卸载**/**从 .vpx 安装**/撤销终端授权;Changed 自动刷新 | PluginManagerEnableDisableTests、PluginInstallUninstallTests |
-| 插件管理页 日志查看(2026-10-24) | 02/06 | 每行「查看日志」:只读窗口显示该插件日志尾部(256 KB),可刷新、打开所在文件夹;日志按插件 id 落在 `~/.velashell/logs/plugins/<id>.log`,满 1 MB 轮转一份。来源全在宿主侧,不需要 SDK 新契约:`IPluginLogger`(进程内直调、隔离进程经 RPC 转回)、隔离进程的 stdout / stderr、宿主替插件记的激活 / 激活失败 / 崩溃;卸载时删除,不进诊断包 | PluginLogFilesTests(含真夹具插件 inProcess / isolated 两种模式)、PluginLogViewModelTests |
+| 插件管理页 日志查看(2026-10-24) | 02/06 | 每行「查看日志」:只读窗口显示该插件日志尾部(256 KB),可刷新、打开所在文件夹;日志按插件 id 落在 `~/.velashell/logs/plugins/<id>.log`,满 1 MB 轮转一份。来源全在宿主侧,不需要 SDK 新契约:`IPluginLogger`(进程内直调、隔离进程经 RPC 转回)、隔离进程的 stdout / stderr、宿主替插件记的激活 / 激活失败 / 崩溃;卸载时删除;导出诊断包时可按插件勾选(默认不收,2026-10-25 起) | PluginLogFilesTests(含真夹具插件 inProcess / isolated 两种模式)、PluginLogViewModelTests |
 | SDK 测试替身 | 09/13 | `TestPluginContext` + 全能力内存替身,插件无宿主可单测 | 被 HelloWorld 测试 dogfood |
 | 示例与开发内环 | 09 | HelloWorld(AXAML 面板/双语/各能力演示);F5 自动重建镜像插件。**仓库外插件(SDK 1.4)**:宿主自登记 `host.json` → `vela-plugin dev init` 生成 IDE 启动配置(`--dev-root` / `--wait-debugger` / `--data-root` 独立调试实例);开发期插件走影子副本装载 + 管理页"重新加载" + `--dev-watch` 自动重载。**协议 / 工作台模板(2026-10-24)**:`velaplugin-protocol` / `velaplugin-workspace`,各带测试工程与本机回显服务(开发指南 §2.4) | HelloWorldDemoPanelTests、DevInnerLoopTests、HostRegistryTests、VelaShellStartupArgumentsTests |
 | 能力域:protocols(自带文件协议) | 07 | 声明 → 注册 → 惰性激活 → 注销;宿主的双栏浏览器/传输栈零改动复用;仅 `inProcess`。首个使用者:S3 插件 | PluginProtocolTests |
@@ -87,7 +87,7 @@ AI / Redis 面板另有 headless 装载与交互测试。
 | UI 挂载点 | 命令面板、停靠文档、独立窗口、插件管理页 | 侧栏视图、状态栏、设置页、右键菜单贡献点(蓝图 08) |
 | 跨进程 dock 停靠 | RPC 协议层保留(EmbedRoutingTests),但**宿主 Win32 实现已移除**:跨进程窗口收养与 dock reparenting 根本冲突(卡顿/窗口飘出),**弃用** | 隔离插件一律独立卡片窗口;真·dock 标签用 inProcess;跨平台稳态 = 共享内存表面(蓝图 08 §4,远期) |
 | 发布形态 | 目录即插件 + **.vpx 专属容器一键装/卸**;**SDK/工具/模板五个 NuGet 包**(见下节);**发布产物携带 `plugins/<目录名>/` 与 `VelaShell.PluginHost.*`**(前者按各插件 `<VelaPluginShip>` 取舍,示例插件不进包,目录名 = id 把点换成短横以避开 macOS codesign 的嵌套 bundle 误判;为让宿主进程在磁盘上有真实可执行体,主程序 2026-08-12 起改为摊开发布) | 插件源(registry)与发布者验证(蓝图 10 §3,分期推迟) |
-| 插件商店 / 插件源 | **商店已上线**([market.easilynet.top](https://market.easilynet.top),仓库 [velashell-markets](https://github.com/VelaShellLabs/velashell-markets):上传、审核、检索与分发,认证走 [velashell-identity](https://github.com/VelaShellLabs/velashell-identity));**宿主已内置只读商店客户端**(2026-09-11):打开插件管理页时按 id 批量问一次 `GET /api/plugins/latest`,有新版可在页内下载安装,宿主太旧的**给提示不给按钮**;`.vpx` 验签与**发布者连续性**(同 id 的后续版本必须仍由钉住的那把私钥签名,换钥或去签名要用户看过两个指纹再点头)已落地 | **信任根**:商店说的「这个 id 属于这把钥匙」本身也是 TOFU,缺一份由发布者身份背书的 id↔公钥映射;而且今天只有**更新**路径去查商店,装包路径没查。浏览 / 搜索 / 评价仍在浏览器里,应用内没有商店浏览页(蓝图 10 §4「浏览」) |
+| 插件商店 / 插件源 | **商店已上线**([market.easilynet.top](https://market.easilynet.top),仓库 [velashell-markets](https://github.com/VelaShellLabs/velashell-markets):上传、审核、检索与分发,认证走 [velashell-identity](https://github.com/VelaShellLabs/velashell-identity));**宿主已内置只读商店客户端**(2026-09-11):打开插件管理页时按 id 批量问一次 `GET /api/plugins/latest`,有新版可在页内下载安装,宿主太旧的**给提示不给按钮**;下载只走 https、商店必须给出包的 `fileSha256`,缺了就在下载前拒绝(2026-10-25 起);`.vpx` 验签与**发布者连续性**(同 id 的后续版本必须仍由钉住的那把私钥签名,换钥或去签名要用户看过两个指纹再点头)已落地 | **信任根**:商店说的「这个 id 属于这把钥匙」本身也是 TOFU,缺一份由发布者身份背书的 id↔公钥映射;而且今天只有**更新**路径去查商店,装包路径没查。浏览 / 搜索 / 评价仍在浏览器里,应用内没有商店浏览页(蓝图 10 §4「浏览」) |
 
 ### ❌ 未开始
 
@@ -136,7 +136,7 @@ AI / Redis 面板另有 headless 装载与交互测试。
   并承担进度节流与异常翻译)。
 - 首个使用者:官方 **S3 插件**(`plugins/VelaShell.Plugin.S3`)。内建 S3 支持整体移出宿主 ——
   AWSSDK 依赖、22 项桶配置界面、149 条文案全部随插件走;`ConnectionType` 里不再有具体协议,
-  只有一个 `Plugin`。详见 `docs/S3协议插件化设计.md`。
+  只有一个 `Plugin`。详见 [S3协议插件化设计](../host/S3协议插件化设计.md)。
 - 已知边界:协议能力仅 `inProcess`(隔离进程 RPC 尚不支持宿主→插件的请求方向)。
 
 ## 2026-08-23:装载链路提速与后台活动指示器

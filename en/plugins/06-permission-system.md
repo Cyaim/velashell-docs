@@ -13,7 +13,7 @@ Design goal: give users Android-level transparency and control over “what this
 
 | id | Granted capability |
 | --- | --- |
-| `ui.contributions` | Register/update contribution points, VelaUI surfaces, dialogs, and notifications (rate-limited) |
+| `ui.contributions` | Register/update contribution points, VelaUI surfaces, dialogs, and notifications (rate-limited; in-app message-center notifications come under it with no permission of their own, and users can mute a plugin on the plugin management page — contract in [SDK §3.7](../sdk/sdk-reference.md), unpublished) |
 | `storage.private` | Read/write the plugin's own data directory and KV storage |
 | `settings.own` | Read/write settings contributed by the plugin |
 | `i18n.read` | Read the current language/region |

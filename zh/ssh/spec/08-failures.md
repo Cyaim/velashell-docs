@@ -26,6 +26,9 @@
 
 〔决策〕**比原因码更细的种类用 `*Kind` 枚举交出，零值一律是 `Unknown`（没归类）**：`SshChannelException.FailureKind`（`SshChannelFailureKind`）、
 私钥与证书异常的 `ProblemKind`（`SshKeyProblemKind`）、认证尝试记录的 `SshAuthDetailKind`（[04 §3.4](04-authentication.md)）、主机证书的 `HostCertificateProblemKind`（[03 §5.5](03-key-exchange.md)），
+建连异常的 `SshConnectException.FailureKind`（`SshConnectFailureKind`：主机密钥被拒的出处、代理与跳板的哪一步，§二、§5.2）、转发器起不来的 `SshForwardException.FailureKind`（`SshForwardFailureKind`，[07 §八](07-forwarding.md)）、
+agent 的 `SshAgentException.FailureKind`（`SshAgentFailureKind`）、SFTP 起不来的 `SftpUnavailableException.FailureKind`（`SftpUnavailableKind`，[06 §一](06-sftp.md)），
+以及 `SftpException.MissingExtensions`（缺的是哪个扩展）与 `ForwardErrorEventArgs` 的参数（[07 §五](07-forwarding.md)），
 都连同各自的参数（路径、算法名、Key ID、上限……）一起交出。调用方按种类写界面文案；`Message` 仍是写给开发者的中文，措辞不承诺稳定。
 
 〔决策〕**对端给的文本进 `Message` 之前先清一遍**：控制字符（`ESC`、`CR`、`BEL`…）、`DEL`、C1 控制码与双向文本控制符
@@ -91,6 +94,12 @@ SshException                          抽象基类；带 Reason / Phase / IsRetr
 `Origin`（文件路径、`Parse` 的 origin 或密钥库里的钥名，由入口在异常离开库之前补上）与 `AlgorithmName`，证书另有 `KeyId`、
 `CertificateKey`、`SignerKey`（配错时两边的公钥，界面据此显示指纹）；「文件坏了」的几十种细分合并成 `Malformed`，细节留在内层消息里。
 `SshChannelException` 带 `FailureKind`（`SshChannelFailureKind`）与 `ChannelType` / `SubsystemName` / `Limit`，种类见 [05 §2.3](05-connection.md)。
+建连异常 `SshConnectException` 带 `FailureKind`（`SshConnectFailureKind`）与 `Via`（跳板 / 代理 / ProxyCommand 命令行）/ `Target`（`host:port` 文本）/ `HostKeyType` / `HostKeyAlgorithm` / `HostKeyBits` /
+`MinimumHostKeyBits` / `ProxyReplyCode` / `ProxyReply`（主机密钥类型与 HTTP 状态行来自对端、未清洗）；转发器起不来的 `SshForwardException` 带 `FailureKind`（`SshForwardFailureKind`）与 `Endpoint` / `Port` / `Limit` /
+`Timeout` / `DisplayName` / `ExitCode` / `ErrorOutput`（xauth 的 stderr，已清洗）/ `ConfigLine`；`SshAgentException` 带 `FailureKind`（`SshAgentFailureKind`）与 `Endpoint` / `PipeOwner`（命名管道属主的 SID）/
+`RequestedAlgorithm` / `SignedAlgorithm`（来自 agent，未清洗）/ `HasDestinationConstraints`；`SftpUnavailableException` 带 `FailureKind`（`SftpUnavailableKind`）与 `ServerVersion`。
+这几个枚举都放在各自的领域文件夹，建连的那个在 `Diagnostics/`（底座不依赖别的文件夹，所以参数一律是字符串与整数）；异常类型与 `Reason` 不变，按类型 `catch` 的调用方不受影响。
+TCP 拨号认不出的套接字错误原因码仍是 `Unknown`，种类 `TcpConnectFailed` 并带 `Target`，错误码在内层的 `SocketException`。
 
 读私钥、读证书、解析公钥发生在连接之外（也可能根本没有连接），所以 `Phase` 是 `None`。
 密钥交换里解析对端的主机密钥失败时，由密钥交换把它包成 `Reason` 为 `HostKeyRejected` 的 `SshConnectException`。
@@ -100,7 +109,10 @@ exec / pty-req / shell 被拒报成 `ChannelOpenFailed`（通道其实开成功�
 调用方于是只能去解析消息句子 —— 而消息是写给开发者的诊断文本，不是界面文案，也不承诺措辞稳定。
 没有合适的值就加一个，不借一个相近的；只有异常类型本身只对应一种失败时才在类型里固定（上面第一张表）。
 
-主机密钥被拒没有专门的类型：它是 `Reason` 为 `HostKeyRejected` 的 `SshConnectException`，策略给的原因就是它的 `Message`（§3）。
+主机密钥被拒没有专门的类型：仍是 `Reason` 为 `HostKeyRejected` / `HostKeyChanged` 的 `SshConnectException`，**`FailureKind` 分开库自己拒的与策略拒的**：
+`HostKeyMalformed`（`K_S` 解析不了）/ `HostKeyAlgorithmMismatch`（类型串与协商出的算法不符）/ `HostKeyTooShort`（RSA 不足下限，`HostKeyBits` / `MinimumHostKeyBits`）/ `HostKeySignatureInvalid`（交换哈希的签名验不过）
+发生在问策略之前，消息是库的；`HostKeyPolicyRejected` 时 `Message` 就是策略给的原因（库不改写）；`HostKeyPolicyRejectedWithoutReason` 是策略返回了未填的裁决（`default`）。
+〔决策〕曾经调用方只能假定「`HostKeyRejected` 的消息都是策略写的」，签名验不过时界面显示的是库的中文。
 
 〔决策〕**公开 API 只抛上面这一层的异常。**对端发来的东西解不开（KEXINIT 的名单被截断、收到空载荷的帧）在握手、认证期间与会话期间
 同一个口径：`SshProtocolException`（`ProtocolError`，`Phase` 是出事的那一步）；对端在一个报文中途断开是 `SshConnectionClosedException`
@@ -290,6 +302,11 @@ IReadOnlyList<SshHopInfo> Hops   // 跳板链/代理链上每一跳：类型、�
 `SshHopInfo` 至少有 `Kind`（`Tcp` / `Socks5` / `HttpConnect` / `SshJump` / `ProxyCommand`）、
 `Target`、`Succeeded`、`Elapsed`、`Detail`。
 填写规则（从近到远、内层原样保留）见 `09-dialing.md` §2.2。
+
+〔决策〕**`FailureKind` 说清是代理与跳板的哪一步**：代理连不上、握手超时、握手中途断开、主机名放不进请求、SOCKS5 凭据超长、SOCKS5 的版本字节 / 方法 / 地址类型 / 应答码（`ProxyReplyCode`）、
+HTTP 应答不是 HTTP / 头太大 / 状态码（`ProxyReplyCode` 与状态行 `ProxyReply`）、ProxyCommand 连上之前退出（`ProxyReplyCode` 退出码、`ProxyReply` stderr 末尾）；
+跳板连不上、建连超时、不肯转发、转发时出问题、转发超时（`Via` 是跳板、`Target` 是目标），逐个种类见 `09-dialing.md` §2.2、§三、§四、§五、§六。
+`DialHops` 改写一个异常只为补上跳的信息时，原来的种类与参数原样带过去。使用者按种类写文案，不解析句子。
 
 〔决策〕HTTP CONNECT 代理拒绝 22 端口时，**在消息里直接给出建议**
 （「代理可能只放行 80/443，请改用 SOCKS5 或直连」）。

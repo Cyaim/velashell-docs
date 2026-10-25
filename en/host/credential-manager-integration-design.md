@@ -134,6 +134,8 @@ The correct structure is two seams, each owning one layer:
                 └────────────────────────────────────────────────────────────────┘
 ```
 
+Seam A landed on 2026-10-25 (`IMasterKeyStore` + `MasterKeyResolver`; one implementation each for the macOS keychain and the Linux Secret Service, while Windows keeps the DPAPI-wrapped key file and has no `IMasterKeyStore` implementation); see the 2026-10-25 errata at the top of the [keychain research](system-keychain-and-sudo-credential-fill-feasibility-research.md).
+
 What "two entry points to the same thing as the system-keychain research" means concretely:
 
 - The **`IMasterKeyStore`** of the research's phases 0/1 protects the ciphertext **that VelaShell itself stores**; it and this document do not depend on each other and proceed in parallel.
@@ -167,7 +169,7 @@ The "Resolution point" column says where this design turns the reference into a 
 | Tunnel panel background connection | `ConnectTunnelHostAsync` `:1767-1791`; tunnel automatic reconnect `TunnelPanelViewModel.AutoReconnectAsync` `:591-600` | The tunnel panel's server list | `BuildChainAsync`; automatic reconnect uses non-interactive mode |
 | SSH jump tunnel of workspace plugins | `EstablishWorkspaceTunnelAsync` `:4276-4339` (the jump profile is read from the repository `:4304`; an already connected session may be reused `:4310`) | Repository instance | `BuildChainAsync` |
 | Recent connections / command palette / session tree / startup restore / "Connect" in the profile dialog | `TryConnectRecentAsync` `:4531`, palette `:2192`, `SessionTreeViewModel` → `MainWindow.axaml.cs:446`, restore `MainWindow.axaml.cs:526-578`, dialog `MainWindow.axaml.cs:1187` | Each one's own cache / repository instance | Routed by protocol |
-| External launch (URL / command line / `.xsh`) | `ExternalLaunchCoordinator.cs:66` → `ResolveProfileAsync` `:223-268` (when the request carries no password, the saved profile is reused `:225`) | Saved or temporary profile | Routed by protocol |
+| External launch (URL / command line / `.xsh`) | `ExternalLaunchCoordinator.cs:67` → `ResolveProfileAsync` `:236-285` (when the request carries no password, the saved profile is reused `:238`) | Saved or temporary profile | Routed by protocol |
 | Plugin `Sessions.OpenAsync` (the AI plugin's `open_session`) | `SessionsCapability.OpenAsync` `:91-145` → `HostSessionOpener.cs:48` → `TryConnectProfileAsync` | Repository instance; the plugin only gets a `SessionInfo`, **with no credentials** | `BuildChainAsync` |
 | Test connection | `ConnectionProfileViewModel.cs:1202` → `TestConnectionAsync` `ConnectionWorkflowService.cs:57-88` | A new object from `BuildProfile()` | `BuildChainAsync`; plugin protocols go through `ProbePluginConnectionAsync` `:4201-4245` |
 | Connection diagnostics step 4 | `ConnectionDiagnosticsService.cs:236` → `TestConnectionAsync`; `HasStoredCredentials` `:351-360` decides whether to skip | Tree cache or `tab.Profile` | `BuildChainAsync` |
@@ -189,9 +191,9 @@ The "Resolution point" column says where this design turns the reference into a 
 | `RequiresFtpCredentials` | `:4492-4494` | `:3661` | Same as above |
 | `ConnectionWorkflowService.ValidateProfile` | `ConnectionWorkflowService.cs:258-307`; **throws** when the password is empty (`:286-289`) | `ConnectProfileAsync` `:94` (credentials required), `SaveProfileAsync` `:40` (not required) | Skip the non-empty password check when there is a reference |
 | `ConnectionDiagnosticsService.HasStoredCredentials` | `:351-360` | Step 4 `:223-231` | A reference counts as having credentials |
-| `ExternalLaunchCoordinator` | `:225` | — | No change needed: when the request carries no password the saved profile is reused, and it is enough for the saved profile to carry a reference |
+| `ExternalLaunchCoordinator` | `:238` | — | No change needed: when the request carries no password the saved profile is reused, and it is enough for the saved profile to carry a reference |
 
-**Paths with no decision and no prompt**: `ReconnectTabAsync`, opening and reconnecting plugin terminals, `ProbePluginConnectionAsync`, the jump connection of `EstablishWorkspaceTunnelAsync`, and each jump hop in `BuildChainAsync`.
+**Paths with no decision and no prompt**: `ReconnectTabAsync`, opening and reconnecting plugin terminals, `ProbePluginConnectionAsync`, the jump connection of `EstablishWorkspaceTunnelAsync`, and each jump hop in `BuildChainAsync`. The session health check (since 2026-10-25, `TestConnectionUnattendedAsync`, connections assembled with `ConnectionInfo.IsUnattended`) does not prompt either: without stored credentials it skips as diagnostics does and records "Needs credentials"; anything needing a human answer (fingerprint, one-time code, password change, Tailscale re-check) is rejected and recorded as "Needs you".
 
 ### 2.4 Retry loops and the login dialog
 
@@ -212,7 +214,7 @@ The "Resolution point" column says where this design turns the reference into a 
 
 ### 2.5 All persistence points
 
-The repository has a single implementation, `SonnetDbSessionRepository`: `SaveSessionAsync` → `Protect` (`:131-140`) clones first and then encrypts; reads `Unprotect` (`:167-173`) **decrypt in place**, so whatever any repository read returns is plaintext. When `SaveSessionAsync` updates an existing profile, it keeps the directory bookmarks already in the store rather than taking the ones passed in (the callers in the table below that write back a whole profile mostly hold stale copies); Gist sync pull and backup import, which must overwrite bookmarks too, go through `ReplaceSessionAsync`, and changing only bookmarks goes through `UpdateDirectoryBookmarksAsync` (other fields untouched).
+The repository has a single implementation, `SonnetDbSessionRepository`: `SaveSessionAsync` → `Protect` (`:131-140`) clones first and then encrypts; reads `Unprotect` (`:167-173`) **decrypt in place**, so whatever any repository read returns is plaintext. When `SaveSessionAsync` updates an existing profile, it keeps the directory bookmarks already in the store rather than taking the ones passed in (the callers in the table below that write back a whole profile mostly hold stale copies); Gist sync pull and backup import go through `ReplaceSessionAsync` and overwrite the bookmarks too when the payload / file carries the bookmarks field, while those without it (payloads pushed by older versions, backups from before directory bookmarks, CSV) go through `SaveSessionAsync` and keep the local bookmarks (backup import since 2026-10-25), and changing only bookmarks goes through `UpdateDirectoryBookmarksAsync` (other fields untouched).
 
 | Save point | Location | Honours "Remember password"? |
 |---|---|---|
@@ -836,7 +838,7 @@ Sources: [keepassxc-cli manual](https://github.com/keepassxreboot/keepassxc/blob
 
 ## 9. System keychain provider
 
-- **Phase 2**, depending on the `IMasterKeyStore` P/Invoke layer from phases 0/1 of the [keychain research](system-keychain-and-sudo-credential-fill-feasibility-research.md).
+- **Phase 2**. The P/Invoke layer from phases 0/1 of the [keychain research](system-keychain-and-sudo-credential-fill-feasibility-research.md) has landed for macOS / Linux (2026-10-25) and can be reused; the Windows provider needs its own `CredReadW` / `CredEnumerateW` (`IMasterKeyStore` has no Windows implementation — the local key there is a DPAPI-wrapped file).
 - **Windows first**: `CredEnumerateW` for search (filtered by TargetName), `CredReadW` to read `CRED_TYPE_GENERIC` entries; `ItemId` is the TargetName, the username comes from `UserName` and the password from `CredentialBlob` (UTF-16; whether every writer uses UTF-16 is **to be tested**).
 - No CLI runner and no unlock cache are needed.
 - Implementation details for macOS (`SecItemCopyMatching`) and Linux (libsecret) are settled together with the platform layer in §2 of the research document.

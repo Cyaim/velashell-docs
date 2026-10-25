@@ -19,7 +19,7 @@
 
 | id | 授予的能力 |
 | --- | --- |
-| `ui.contributions` | 注册/更新贡献点、VelaUI 表面、对话框、通知(有频控) |
+| `ui.contributions` | 注册/更新贡献点、VelaUI 表面、对话框、通知(有频控;应用内消息中心的通知随它,不另设权限项,用户可在插件管理页按插件静音 —— 契约见 [SDK §3.7](../sdk/sdk-reference.md),尚未发布) |
 | `storage.private` | 读写自己的 data 目录与 KV 存储 |
 | `settings.own` | 读写自己贡献的设置项 |
 | `i18n.read` | 读取当前语言/地区 |

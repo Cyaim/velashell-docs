@@ -65,6 +65,10 @@ it fails with `SftpUnavailableException` (`CommandFailed`), carrying the exit st
 and the last part of what it said on stderr (`ServerErrorOutput`, sanitized as peer text with newlines folded into one line). The SFTP channel still discards stderr, it only keeps the last 1 KiB as a clue;
 the exit status often arrives after EOF, so it waits for it at most 2 more seconds. 〔History〕This used to report "the SFTP channel closed while requests were still in flight", losing both the exit status and that line — the only clue there is.
 
+〔Decision〕**The ways the handshake can fail are told apart by `SftpUnavailableException.FailureKind` (`SftpUnavailableKind`)**: the `subsystem` request refused `SubsystemRejected`,
+the handshake timed out `HandshakeTimeout`, sftp-server exited before `VERSION` `ServerExited`, the server's version too old `VersionTooOld` / too new `VersionTooNew` (both carry `ServerVersion`, §9),
+and this side has already shut down `SessionClosed` (§5.4). Reason codes are unchanged; callers can say "version too old" or "closed locally" instead of always "the server has no SFTP".
+
 ---
 
 ## 2 Outer structure of SFTP messages
@@ -443,7 +447,7 @@ requests sent afterwards throw that exception immediately too. This is a direct 
 | The channel ended normally (the peer sent EOF / CLOSE, e.g. sftp-server exited; or the channel was closed locally) | `SftpTransferInterruptedException`. The pipeline layer does not know how far writes got, so its `DurableLength` is 0; a file stream replaces it in `FlushAsync` / on close with one carrying that stream's exact `DurableLength` (§6.2), keeping the cause as the inner exception |
 | The connection dropped | The connection fault handed out by the channel's reader, as is (`ObjectDisposedException` when the connection was disposed locally) |
 | A malformed frame arrived (length over the limit, too short for a `request-id`, §9) | `SshProtocolException` (`ProtocolError`) |
-| `SftpFileSystem` (and with it the pipeline) disposed locally | `SftpUnavailableException` |
+| `SftpFileSystem` (and with it the pipeline) disposed locally | `SftpUnavailableException` (reason code still `Unsupported`, kind `SessionClosed` — this side shut down, the server did not refuse anything) |
 
 Callers that have no id yet — those waiting on the in-flight limit or the send lock — must be **released too**: they receive the fault from the table above,
 or, in a race during disposal, `ObjectDisposedException`. In-flight slots are returned only by replies, and no reply comes after the pipeline stops; without the release,
@@ -637,7 +641,7 @@ The stream's `Length` is the real length from `FSTAT` at open time (§4.1), so `
 
 | Extension | Purpose | Behavior when absent |
 | --- | --- | --- |
-| `posix-rename@openssh.com` | **Atomic** rename (overwriting the target), `RenameAsync(..., overwrite: true)` | Throw `SftpException` (`OperationUnsupported`), **no degradation** — a plain `SSH_FXP_RENAME` fails when the target exists, so silently degrading would change the semantics; "delete the target, then rename" is not atomic and is left for the caller to decide |
+| `posix-rename@openssh.com` | **Atomic** rename (overwriting the target), `RenameAsync(..., overwrite: true)` | Throw `SftpException` (`OperationUnsupported`, with it in `MissingExtensions`), **no degradation** — a plain `SSH_FXP_RENAME` fails when the target exists, so silently degrading would change the semantics; "delete the target, then rename" is not atomic and is left for the caller to decide |
 | `hardlink@openssh.com` | Create hard link | Throw `Unsupported` |
 | `fsync@openssh.com` | Force persistence to disk | Throw `Unsupported` |
 | `limits@openssh.com` | §5.2; when it announces `max-open-handles`, opens queue on it: each open file or directory takes one slot and returns it on close, and a new `OPEN` / `OPENDIR` waits when the slots run out, instead of hitting the server's limit and getting a random "operation failed" | Use conservative defaults; handles unlimited |
@@ -647,6 +651,10 @@ The stream's `Length` is the real length from `FSTAT` at open time (§4.1), so `
 | `expand-path@openssh.com` | Expand `~`: `ExpandPathAsync(path)` hands `~`, `~/…`, `~user` and `~user/…` to the server whole (canonicalized along the way, checked against a real OpenSSH's `$HOME`); a path not starting with `~` behaves like `GetRealPathAsync`. `REALPATH` itself does not expand `~` | `~` and `~/…` are joined onto the login working directory and then `REALPATH`ed; `~user` falls back to `home-directory` |
 | `lsetstat@openssh.com` | Set attributes **without following** a symbolic link (`touch -h` / `chown -h`): `SetLinkAttributesAsync`, for keeping a link's own timestamps when syncing directories | Throws `Unsupported` (see `HasLSetStat`) and **does not fall back** to the link-following `SETSTAT` — that would change the target |
 | `users-groups-by-id@openssh.com` | Turn numeric uids / gids into names: `LookupUserAndGroupNamesAsync(uids, gids)`, one to one with what was asked, `null` for ids the server does not know (an empty string on the wire; checked against a real OpenSSH's `id`). The request is two `string`s, each holding a run of `uint32`; the reply is two `string`s, each holding a run of `string`. A reply with the wrong count is reported as malformed (names never land on the wrong ids); at most 4096 of each per request | Throws `Unsupported` (see `HasUsersGroupsById`); the host keeps showing numbers |
+
+〔Decision〕**When the server has not announced an extension, the `OperationUnsupported` the library reports itself names the missing extension**: `ServerMessage` is empty (the server said nothing), and the missing one is in `SftpException.MissingExtensions` —
+`posix-rename`, `hardlink`, `statvfs`, `copy-data`, `lsetstat` and `users-groups-by-id` one each, and `ExpandPathAsync("~user")` both `expand-path@openssh.com` and `home-directory`.
+Callers can then say which one after "this operation is not supported" (an overwriting rename adds that "delete, then rename" is not atomic) without parsing the message.
 
 〔Decision〕**Setting times by handle** (v3's `FSETSTAT`, not an extension): `SftpFileStream.SetTimesAsync(accessTime, modifyTime)` sets them on the same handle before closing,
 one round trip; `SetLastWriteTimeAsync(path, …)` has to `STAT` the access time back first and then `SETSTAT` (the two share one flag, and giving only one wipes the other back to 1970), two round trips.
@@ -730,8 +738,8 @@ and the local platform's path functions must not be used (on Windows they treat 
 | handle exceeds 256 bytes | `ProtocolError` (the limit specified by draft-02) |
 | Reply received for an unknown `request-id` | 〔Decision〕Ignore + debug log (may be a late reply to a cancelled request, §5.3) |
 | Unknown message type received | `ProtocolError` (the SFTP layer has no `UNIMPLEMENTED` mechanism) |
-| Server version > 3 | 〔Decision〕**Refuse**, `SftpUnavailableException` (`ProtocolError`): draft-02 §4 requires the server to reply with the lower of the two versions, and we send 3; a server replying with a higher one is either buggy or will speak its own version (ATTRS differs from v4 on), and parsing it as v3 silently misreads fields. 〔History〕It used to downgrade to 3 and continue |
-| Server version < 3 | 〔Decision〕**Refuse**, throw `SftpUnsupportedVersion`. v0–v2 differ too much to be worth supporting |
+| Server version > 3 | 〔Decision〕**Refuse**, `SftpUnavailableException` (`ProtocolError`, kind `VersionTooNew`, with `ServerVersion`): draft-02 §4 requires the server to reply with the lower of the two versions, and we send 3; a server replying with a higher one is either buggy or will speak its own version (ATTRS differs from v4 on), and parsing it as v3 silently misreads fields. 〔History〕It used to downgrade to 3 and continue |
+| Server version < 3 | 〔Decision〕**Refuse**, throw `SftpUnavailableException` (`Unsupported`, kind `VersionTooOld`, with `ServerVersion`). v0–v2 differ too much to be worth supporting |
 | `READ` returns more data than the requested length | `ProtocolError` |
 | `count` returned by `READDIR` does not match the actual number of entries | `ProtocolError` |
 | Malformed reply payload (truncated field, length out of bounds, etc.) | 〔Decision〕Throw the public `SshProtocolException` (`ProtocolError`); **the internal parsing exception must not leak** — it is an internal type that callers cannot catch by type. Affects only that one call: parsing happens on the caller's path, and the pipeline remains usable |

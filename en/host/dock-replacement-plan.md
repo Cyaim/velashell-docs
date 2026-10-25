@@ -110,9 +110,14 @@ Docking/
 
 - `DockWorkspace.Root : DockNode` — initially a single `DockGroup` (`IsPrimary=true`).
 - **Structural operations** (all in the model layer and unit-testable):
-  - `AddDocument(doc)`: put the document in the most suitable pane and activate it. Three-tier placement:
-    **empty pane > the pane currently in use > the primary group** (since 2026-09-10; it used to always target the
+  - `AddDocument(doc, target = null)`: put the document in the most suitable pane and activate it. Order of precedence (since 2026-10-25): a `target` that is still on the tree;
+    otherwise the pane of a `TargetNewDocumentsAt` ticket carried by the current async flow; otherwise `PlacementResolver`; finally the default three tiers:
+    **empty pane > the pane currently in use > the primary group** (the three tiers since 2026-09-10; it used to always target the
     primary group, which after a split opens new tabs on the half the user is not looking at).
+  - `TargetNewDocumentsAt(group) : IDisposable` (since 2026-10-25, for the tab strip's `+`): puts a "land in this pane" ticket into an `AsyncLocal`,
+    so neither the new-connection dialog nor the connection flow needs an extra parameter — the ticket flows down with `await`, and the **first** document the flow creates claims it; a ticket is used once and expires on dispose
+    (a background task started inside the flow cannot use it for things it creates later), and other flows (automatic reconnect, layout template restore) never see it. If the pane is no longer on the tree, the default rule applies.
+    It lives in the model layer rather than the host because `PlacementResolver` is already taken by the layout template restorer; the two never meet in one flow, and the ticket comes before it.
   - `RemoveDocument(doc)`: silently remove (connection-failure tab-removal path), then collapse empty groups.
   - `CloseDocument(doc)`: respect `CanClose` → remove → raise `DocumentClosed`.
   - `CloseOthers/All/Left/Right(doc)`: call `CloseDocument` one by one (ensures the complete SSH cleanup chain).

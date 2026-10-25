@@ -393,6 +393,10 @@ event EventHandler<ForwardErrorEventArgs>      Error;              // 单条连�
 
 `ForwardErrorEventArgs.Reason` 是枚举 `ForwardErrorReason`（`Accept` / `ConnectionLimit` / `SocksHandshake` / `ChannelOpen` /
 `TargetConnect` / `Relay` / `SetupSkipped` / `TargetNotPermitted`；零值是 `Unknown`），不是字符串 —— 调用方按它分流，不必去认一串约定的文字。
+〔决策〕**没带 `Exception` 的那几种也有参数可说**：`Target`（这条连接要去的目标；本地转发到套接字时不再带中文前缀，`Message` 不变）、
+`Timeout`（超时的那几种才有：SOCKS 握手超时、隧道在 `ChannelOpenTimeout` 内没打开）、`Limit` 与 `RejectedCount`（撞上并发上限时的上限与这期间拒掉的条数），
+目标不在放行名单（`TargetNotPermitted`）同样带 `Target`。使用者据此用自己的语言写「隧道在 N 秒内没打开」「已达上限 N，这期间拒了 M 条」，
+不再拿到一句「原因：中文」。
 
 同时走 `System.Diagnostics.Metrics`：
 
@@ -442,6 +446,11 @@ Metrics 给服务端场景（接 OpenTelemetry）。二选一都会逼使用者�
 
 〔决策〕**在搬运循环里、写到另一头之前等**：等的时候不再读，数据留在读缓冲里，背压经 TCP 窗口 / 通道窗口自然传回发送方 ——
 不另开缓冲，也不丢数据。用途：慢链路上开着好几条隧道时，不让一条下载把交互终端挤满。
+
+〔决策〕**大块切开搬。**一次读到的数据比一秒额度大时（通道那头机器忙时会一次交出几百 KB），不整块记账、整块等完再整块写出，而是一段一段搬：
+每段不超过一块缓冲（§六的 32 KiB），也不超过限速放行的量（至多一秒额度），逐段等、逐段写，没搬的留在读缓冲里。
+平均速率不变，单次突发不超过一秒额度，面板上的字节数与速率也一段一段往上走。等额度时转发器收工或连接中止，当场停下，只计已经写出去的。
+不限速时照旧整块写。〔历史〕曾经整块等：64 KB/s 的隧道一次读到 256 KB，先什么都不写、等满三秒，再一口气写出 256 KB。
 
 ---
 
@@ -538,6 +547,11 @@ agent 服务没起时远端的 `ssh` / `git` 一直挂到 shell 关掉。文件�
 agent 协议没有请求 id，请求可能只写了一半、应答可能还在路上，之后的调用一律以 `AgentUnavailable` 失败，由调用方重连
 （`ConnectAsync` 连上的客户端在会话声明那条路上自己重开，§7.4）。〔历史〕早期照常接着用，下一问读到的是上一问迟到的答案。
 
+〔决策〕**agent 的失败带种类**（`SshAgentException.FailureKind`，`SshAgentFailureKind`，`Endpoint` 是端点）：没在跑 `NotRunning`、连不上 `ConnectFailed`、
+管道属主读不到 / 不可信 `PipeOwnerUnreadable` / `PipeOwnerUntrusted`（§7.2）、上面这种问答错位之后的调用 `ConversationOutOfStep`、应答之前就断开 `ClosedBeforeReply`、
+通信失败 `CommunicationFailed`、应答不合协议 `MalformedReply`、签回的算法不符 `SignatureAlgorithmMismatch`（04 §4.5）、拒签 `SignRefused`、拒绝加钥 `AddRefused`、
+拒绝清空 `RemoveAllRefused`、请求超出报文上限 `RequestTooLarge`（§7.3）。原因码不变；使用者按种类写文案，不解析消息。
+
 ### 7.2 安全要求
 
 > **Agent 转发是一把上膛的枪。** 远端主机上的 root 可以在转发期间
@@ -568,7 +582,7 @@ RSA 证书与 RSA 钥一样拿到远端要的 SHA-2；按证书自己的类型�
 恰好夹在中间到的一条请求不能在释放返回之后还替远端签一次名。
 
 〔决策〕**Windows 上连命名管道形态的 agent 之前，先确认管道的属主可信**：当前用户、SYSTEM 或 Administrators，
-否则拒绝连接。OpenSSH agent 的管道名是固定的（`openssh-ssh-agent`），服务没在跑的时候本机任何用户都能先把这个名字建出来，
+否则拒绝连接（`SshAgentException`，种类 `PipeOwnerUntrusted`，`PipeOwner` 是属主的 SID；读不到属主是 `PipeOwnerUnreadable`）。OpenSSH agent 的管道名是固定的（`openssh-ssh-agent`），服务没在跑的时候本机任何用户都能先把这个名字建出来，
 之后收到的是签名请求 —— 往 agent 里加钥（§7.3）时还有**明文私钥**。抢先建管道的人只能把属主设成自己。
 不靠把模拟级别降到 Identification 来防：OpenSSH 的 agent 服务要以连进来的用户身份保存密钥，降级会把正常的 agent 一起弄坏。
 
@@ -689,7 +703,7 @@ agent 已被锁定（`ssh-add -x`）、agent 不支持这种密钥类型。带�
 | 请求 | 消息号 | 内容 | 方法 | 应答 |
 | --- | :-: | --- | --- | --- |
 | 删一把（`ssh-add -d`） | `18` `SSH_AGENTC_REMOVE_IDENTITY` | string 公钥 blob（证书就给证书 blob） | `RemoveIdentityAsync` | SUCCESS → `true`；FAILURE（没有这把、agent 锁着）→ `false` |
-| 清空（`ssh-add -D`） | `19` `SSH_AGENTC_REMOVE_ALL_IDENTITIES` | 无 | `RemoveAllIdentitiesAsync` | FAILURE 抛 `SshAgentException`（`AgentRefused`，消息点出「锁定」） |
+| 清空（`ssh-add -D`） | `19` `SSH_AGENTC_REMOVE_ALL_IDENTITIES` | 无 | `RemoveAllIdentitiesAsync` | FAILURE 抛 `SshAgentException`（`AgentRefused`，种类 `RemoveAllRefused`，消息点出「锁定」） |
 | 锁（`ssh-add -x`） | `22` `SSH_AGENTC_LOCK` | string 口令 | `LockAsync` | SUCCESS → `true`；FAILURE（已经锁着）→ `false` |
 | 解锁（`ssh-add -X`） | `23` `SSH_AGENTC_UNLOCK` | string 口令 | `UnlockAsync` | SUCCESS → `true`；FAILURE（口令不对、本来没锁 —— agent 不区分）→ `false` |
 
@@ -848,7 +862,7 @@ sequenceDiagram
 | `SshAgentHop` 的终点 | 非 `null` | `ArgumentNullException` |
 | `SshAgentHop` 的用户名 | `null` = 不限；给了就非空、UTF-8 不超过 255 字节、不含空白、控制字符、`,` 与 `!` | `ArgumentException` |
 | `AllowedHops` | `null`，或者 1–64 条、元素非 `null`；条目原样保留，不去重 | `ArgumentException` |
-| 整条加钥报文 | 不超过 agent 报文上限（256 KiB，§7.1） | 发送前抛 `SshAgentException`（`LimitExceeded`），一个字节都不发 |
+| 整条加钥报文 | 不超过 agent 报文上限（256 KiB，§7.1） | 发送前抛 `SshAgentException`（`LimitExceeded`，种类 `RequestTooLarge`），一个字节都不发 |
 
 为什么这样定：
 
@@ -894,8 +908,8 @@ sequenceDiagram
 | 情形 | 结果 |
 | --- | --- |
 | `6` SUCCESS | 加上了 |
-| `5` FAILURE，或者 `28` EXTENSION_FAILURE | `SshAgentException`（`AgentRefused`）。带 `AllowedHops` 时，消息在 §7.3 的三种常见原因之外再点出「agent 不支持目的地约束（`restrict-destination-v00@openssh.com`，OpenSSH 8.9 起才有；非 OpenSSH 的 agent 多半不支持）」 |
-| 报文超过 256 KiB | 发送前抛 `SshAgentException`（`LimitExceeded`），消息说「密钥或目的地约束太大」 |
+| `5` FAILURE，或者 `28` EXTENSION_FAILURE | `SshAgentException`（`AgentRefused`，种类 `AddRefused`，`HasDestinationConstraints` 说明带没带约束）。带 `AllowedHops` 时，消息在 §7.3 的三种常见原因之外再点出「agent 不支持目的地约束（`restrict-destination-v00@openssh.com`，OpenSSH 8.9 起才有；非 OpenSSH 的 agent 多半不支持）」 |
+| 报文超过 256 KiB | 发送前抛 `SshAgentException`（`LimitExceeded`，种类 `RequestTooLarge`），消息说「密钥或目的地约束太大」 |
 
 〔决策〕
 
@@ -907,7 +921,7 @@ sequenceDiagram
 4. **不新增 `SshFailureReason`。**agent 不说拒绝的原因，`AgentRefused` 就是实话；调用方知道自己给了 `AllowedHops`，界面可以据此加一句提示，
    不必解析消息。宿主的 `SshInterop.Localize` 不用动。
 5. **签名被拒的提示多一条。**带目的地约束的钥用在不放行的主机、用户或路径上时 agent 拒签，认证器把它记为这条凭据的 `SkippedNoMaterial`、
-   接着试下一条（04 §3.4）。`SignAsync` 拒签的消息在「钥已不在 agent 里」「逐次确认被拒」之外，加上「这把钥带目的地约束（`ssh-add -h`），
+   接着试下一条（04 §3.4）。`SignAsync` 拒签（`AgentRefused`，种类 `SignRefused`）的消息在「钥已不在 agent 里」「逐次确认被拒」之外，加上「这把钥带目的地约束（`ssh-add -h`），
    不许用在这台主机、这个用户或这条转发路径上」。
 
 #### 与会话声明（§7.4）、agent 转发（§七）的配合
@@ -1196,6 +1210,12 @@ X 的 SECURITY 扩展规定：受限授权在「没有任何连接在用它」�
 〔决策〕**「没开成」包括本机这一侧的任何准备失败，以及服务端拒绝**：X11 是拿不到显示、找不到或跑不起 `xauth`、
 给 `xauth` 用的临时目录建不了、服务端拒绝 `x11-req`；agent 是本机 agent 连不上（§7.1）、服务端拒绝 `auth-agent-req`。
 **连接本身断了、调用方取消，照常抛出** —— 不当成转发的失败吞掉：吞掉之后下一个请求照样在这条死掉的通道上失败，而真正的原因反而丢了。
+抛出的（或放在 `X11SetupFailure` / `AgentSetupFailure` 上的）`SshForwardException` 带种类（`SshForwardFailureKind`）：X11 是拿不到 X 显示 `NoX11Display`、
+给 `xauth` 用的临时目录建不了 `XAuthTempDirectoryFailed`、`xauth` 跑不起来 `XAuthStartFailed`、超时 `XAuthTimedOut`（`Timeout`）、失败 `XAuthFailed`（`ExitCode` 与 `ErrorOutput`）、
+没生成 cookie `XAuthNoCookie`、服务端拒绝 `x11-req` `X11ForwardRejected`；agent 是本机 agent 不可用 `LocalAgentUnavailable`（内层是带种类的 `SshAgentException`）、
+服务端拒绝 `auth-agent-req` `AgentForwardRejected`。
+〔决策〕**`xauth` 的 stderr 进消息之前按 `PeerText.SanitizeTail` 清洗**、换行收成一行（`ErrorOutput` 也是清洗过的这一份）；普通的一行输出前后一字不变。
+〔历史〕曾经只 `Trim`：带控制字符的输出原样进了消息。
 两项各按各的 `FailureMode` 处理，一项没开成不连累另一项。
 
 ### 7.5.9 本机显示经连接器接入
@@ -1234,8 +1254,9 @@ X 协议里客户端发完就是连接结束，没有「发完了还等回复」
 
 | 情况 | 处理 |
 | --- | --- |
-| 本地端口被占用 | 抛 `SshForwardException`，**不留半挂的监听** |
-| `tcpip-forward` 被拒 | 抛，消息里点明「服务端可能禁用了 AllowTcpForwarding / GatewayPorts」 |
+| 本地端口被占用 | 抛 `SshForwardException`，**不留半挂的监听**。种类 `ListenFailed`（`Endpoint`；被占用与没有权限看内层的套接字错误码）；IPv6 环回那一半起不来 `Ipv6LoopbackBindFailed`；Unix 套接字路径已存在 `SocketPathExists`、超长 `SocketPathTooLong` |
+| `tcpip-forward` 被拒 | 抛，消息里点明「服务端可能禁用了 AllowTcpForwarding / GatewayPorts」。种类 `RemoteListenRejected`（`Port`；1024 以下的特权端口另有说法）；`streamlocal-forward` 被拒 `RemoteSocketListenRejected`；要求服务端分配端口而应答里没有端口 `NoBoundPortInReply` |
+| `ssh_config` 的 `ExitOnForwardFailure yes` 下某一条转发起不来 | `SshForwardException`，种类 `ConfigForwardFailed`，`ConfigLine` 是那一条（`StartForwardsAsync`，`09-dialing.md` §7.3） |
 | 单条连接的通道打开失败 | 触发 `Error` 事件，关掉这一条入站，**转发器继续跑** |
 | 单条连接搬运中出错 | 两侧一起中止（本机 RST，通道不带 `EOF` 的 `CLOSE`），触发 `Error`，转发器继续（§2.2） |
 | 接受入站连接反复失败（如 EMFILE） | 每次触发 `Error`（`ForwardErrorReason.Accept`），退避 50 ms 起、翻倍、封顶 1 秒再接（§2.4） |
@@ -1244,16 +1265,16 @@ X 协议里客户端发完就是连接结束，没有「发完了还等回复」
 | SOCKS 请求里的域名长度为 0 | 回 `0x08`，关掉这一条（§3.1） |
 | SOCKS 请求里的端口为 0 | 回 `0x01`，关掉这一条（§3.1） |
 | SOCKS 握手超时（默认 30 秒） | 关掉这一条，触发 `Error`（`ForwardErrorReason.SocksHandshake`），转发器继续（§3.3） |
-| `forwarded-tcpip` 找不到对应转发器 | 回 `CHANNEL_OPEN_FAILURE(1)`；这条连接上一个远程转发都没有时回 `(3)` |
+| `forwarded-tcpip` 找不到对应转发器 | 回 `CHANNEL_OPEN_FAILURE(1)`；这条连接上一个远程转发都没有时回 `(3)`。只回给服务端的这几种拒绝同样有种类（对不上转发 `UnmatchedForwardedChannel`、X11 已过期 `X11ForwardingExpired`、通道上限 `ChannelLimitReached`、连不上本机目标 `LocalTargetUnreachable`），转发器停了是 `Stopped` |
 | 远程转发释放的宽限期内到达的回连 | 对得上就照常接下（§4.3） |
 | 转发参数的非法值（`MaxConnections` 小于 1、监听端口不在 0–65535、SOCKS 握手时限不为正、绑定地址为 null） | 〔决策〕设值时就抛 `ArgumentOutOfRangeException` / `ArgumentNullException`；起监听之后出了任何错，监听当场关掉。〔历史〕曾经不拦：`MaxConnections = 0` 时监听已经起来、构造转发器才抛，端口一直占到 GC |
 | 在已经断开（或释放）的连接上起转发 | 照实失败：释放了抛 `ObjectDisposedException`，判死了抛那次故障 —— 本地、动态、远程三种一致，不起监听。〔历史〕本地 / 动态转发曾经照样起监听、「成功」返回一个 `IsActive = false` 的转发器 |
 | 并发连接数超上限（〔决策〕默认 1024/转发器） | 拒绝新入站并触发 `Error`，已有连接不受影响。本地/动态转发：关掉这条入站，`Error`（`ForwardErrorReason.ConnectionLimit`）—— 〔决策〕事件**每秒至多一次**，带着这期间拒了几条；度量里的错误计数照常每条都记（〔历史〕曾经每拒一条报一次，上限撞满时一大波连接让宿主逐条推到界面上）。对端在 accept 之前就重置了的那一条（`ConnectionReset` / `ConnectionAborted`）不退避、也不报 —— 那是那一条自己的事，监听好好的（〔历史〕曾经照「接受失败」报错、整个监听退避 50 ms 起步）。远程转发：回 `CHANNEL_OPEN_FAILURE(4)`（resource shortage，§4.1），同样计入 `errors`、触发 `Error`（`ConnectionLimit`，同样每秒至多一次）；〔历史〕曾经只拒掉那条通道，不发事件，也不计数 |
 | 事件订阅者抛异常 | 吞掉，不影响其它订阅者与那条连接（§5） |
-| 请求 agent 转发时本机 agent 连不上 | 不发 `auth-agent-req`；按 `FailureMode` 抛出或照常启动（§7.1、§7.5.8），原因码沿用 agent 那边的（`AgentNotRunning` / `AgentUnavailable`） |
+| 请求 agent 转发时本机 agent 连不上 | 不发 `auth-agent-req`；按 `FailureMode` 抛出或照常启动（§7.1、§7.5.8），原因码沿用 agent 那边的（`AgentNotRunning` / `AgentUnavailable`），种类 `LocalAgentUnavailable` |
 | `auth-agent@openssh.com` 通道到来时本机 agent 连不上 | 回 `CHANNEL_OPEN_FAILURE(2)`，描述只写「本机 ssh-agent 不可用」；会话与转发器不受影响（§7.1） |
 | 本机 agent 不支持会话声明 / 因为它断开 | 照常转发；断开时重连一次、不再声明（§7.4） |
-| 加带目的地约束的钥被 agent 拒绝（`5` / `28`） | 抛 `SshAgentException`（`AgentRefused`），消息点出「agent 可能不支持目的地约束」；**绝不**改成不带约束再加一次（§7.3.2） |
+| 加带目的地约束的钥被 agent 拒绝（`5` / `28`） | 抛 `SshAgentException`（`AgentRefused`，种类 `AddRefused`，`HasDestinationConstraints` 为真），消息点出「agent 可能不支持目的地约束」；**绝不**改成不带约束再加一次（§7.3.2） |
 | 带目的地约束的钥用在不放行的主机、用户或路径上 | agent 拒签；认证记为这条凭据的 `SkippedNoMaterial`、接着试下一条，转发的远端拿到 `FAILURE`（§7.3.2） |
 | 远端发来 `session-bind@openssh.com` 以外的 agent 扩展 | 回 `FAILURE`，不到本机 agent（§7.4） |
 

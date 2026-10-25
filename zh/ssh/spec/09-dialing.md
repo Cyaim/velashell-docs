@@ -51,6 +51,8 @@
 
 顺序是**从近到远**：第 0 项是离本机最近的那一跳。
 内层拨号器失败时，外层**原样保留**内层给出的跳信息，只在后面追加自己的（如果走到了自己）。
+〔决策〕`DialHops` 改写一个异常只为补上跳信息时，原来的 `FailureKind` 与参数（`Via` / `Target` / `ProxyReplyCode` / `ProxyReply`）原样带过去；
+`ProxyDialing.Refused` / `Misconfigured` 的种类是必填参数，漏归类在编译期就拦住。
 
 〔决策〕**`ISshTransportDialer` 不要求实现者声明「我是哪一类」。** 曾经有一个公开的 `Kind` 成员：按每次拨号现选路的实现
 （这次直连、下次经代理 —— 宿主的代理拨号器就是这样）给不出真值，只好记「上一次」；而它又只在作为代理的内层（`via`）时才被读。
@@ -59,15 +61,16 @@
 
 原因码约定：
 
-| 情形 | `Reason` |
-| --- | --- |
-| 代理本身连不上（直连代理时解析不了、被拒、超时、不可达） | `ProxyUnreachable`（可重试）；具体是哪一种在 `InnerException`（原来的 `DnsFailure` / `TcpRefused` / `TcpTimeout` / `TcpUnreachable`）与 `Hops` 里。经别的代理或跳板到达代理时（嵌套），沿用那一跳自己报的原因。〔历史〕曾经与直连相同，调用方分不出没开的是目标还是代理，宿主只好把代理的失败一律改写成 `ProxyRefused` |
-| 代理拒绝转发到目标 | `ProxyRefused` |
-| 代理要求认证而我们没有凭据 | `ProxyAuthRequired` |
-| 代理拒绝了我们配置的凭据 | `ProxyAuthFailed` |
-| 请求在本地就发不出去：主机名放不进代理协议、凭据超长、`ProxyCommand` 的 shell 起不来 | `InvalidConfiguration` |
-| 代理说的话不合协议 | `ProxyRefused`，`Detail` 写明收到了什么 |
-| 代理接下了连接却一直不回握手，连接的计时器到点 | `Timeout`（`Phase` 为 `Dialing`），`Hops` 记「到代理成功 + 这一跳失败」—— 与跳板同一个做法（§2.4），不报成「建立 TCP 连接超时」 |
+| 情形 | `Reason` | 种类（`FailureKind`，`08-failures.md` §5.2） |
+| --- | --- | --- |
+| 代理本身连不上（直连代理时解析不了、被拒、超时、不可达） | `ProxyUnreachable`（可重试）；具体是哪一种在 `InnerException`（原来的 `DnsFailure` / `TcpRefused` / `TcpTimeout` / `TcpUnreachable`）与 `Hops` 里。经别的代理或跳板到达代理时（嵌套），沿用那一跳自己报的原因。〔历史〕曾经与直连相同，调用方分不出没开的是目标还是代理，宿主只好把代理的失败一律改写成 `ProxyRefused` | `ProxyConnectFailed`（`Via` 是代理、`Target` 是目标；嵌套时沿用那一跳自己的种类） |
+| 代理拒绝转发到目标 | `ProxyRefused` | SOCKS5 `Socks5ConnectRefused`（§3.4）、HTTP `HttpConnectRefused`（§4.2）、跳板 `JumpForwardRefused`（§五） |
+| 代理要求认证而我们没有凭据 | `ProxyAuthRequired` | —（原因码已经说清） |
+| 代理拒绝了我们配置的凭据 | `ProxyAuthFailed` | — |
+| 请求在本地就发不出去：主机名放不进代理协议、凭据超长、`ProxyCommand` 的 shell 起不来 | `InvalidConfiguration` | 主机名放不进请求 `ProxyTargetNameInvalid`（`Target` 是那个名字）、SOCKS5 凭据超长 `Socks5CredentialsTooLong` |
+| 代理说的话不合协议 | `ProxyRefused`，`Detail` 写明收到了什么 | SOCKS5 `Socks5VersionMismatch` / `Socks5UnexpectedMethod` / `Socks5InvalidAddressType`（§三）、HTTP `HttpProxyNotHttp` / `HttpProxyResponseTooLarge`（§4.2） |
+| 代理接下了连接却一直不回握手，连接的计时器到点 | `Timeout`（`Phase` 为 `Dialing`），`Hops` 记「到代理成功 + 这一跳失败」—— 与跳板同一个做法（§2.4），不报成「建立 TCP 连接超时」 | `ProxyHandshakeTimeout` |
+| 代理接下了连接，握手说到一半就断开 | 沿用原来的原因码 | `ProxyClosedDuringHandshake` |
 
 ### 2.3 读握手应答时不许多读
 
@@ -118,7 +121,8 @@
 4. 全部失败时报**最后一个**失败的原因，按 `DnsFailure` / `TcpRefused` / `TcpTimeout` / `TcpUnreachable` 归类（`08-failures.md` §3），
    `Hops` 里是一条 `Tcp`。〔决策〕归类按套接字错误如实对应：查不到、DNS 暂时失败（`EAI_AGAIN`，断网时最常见）、
    DNS 不可恢复的错误 → `DnsFailure`；拒绝 → `TcpRefused`；超时 → `TcpTimeout`；网络或主机不可达、本机网络不可用、
-   主机无响应 → `TcpUnreachable`；其余（本机防火墙拦了出站、本机地址不可用……）→ `Unknown`。
+   主机无响应 → `TcpUnreachable`；其余（本机防火墙拦了出站、本机地址不可用……）→ `Unknown`，种类 `TcpConnectFailed`、带 `Target`，
+   错误码在内层的 `SocketException` —— 调用方据此说「连 X 失败」加系统的原话，不必解析句子。
    曾经认不出的一律报成 `TcpRefused`：断网时用户看到「对方拒绝连接」，去查的是服务端。
 
 ```mermaid
@@ -172,8 +176,8 @@ sequenceDiagram
 | 方法列表 | N | 永远包含 `0`（无需认证）；配置了凭据时再加 `2`（用户名/口令） |
 
 应答两个字节：版本（必须是 `5`）与选中的方法。
-选中 `0xFF` 表示「没有可接受的方法」：我们没配凭据时判 `ProxyAuthRequired`，配了判 `ProxyRefused`。
-选中我们没提供的方法是协议错误。
+选中 `0xFF` 表示「没有可接受的方法」：我们没配凭据时判 `ProxyAuthRequired`，配了判 `ProxyRefused`（种类 `Socks5NoAcceptableMethod`）。
+选中我们没提供的方法是协议错误（`ProxyRefused`，种类 `Socks5UnexpectedMethod`，`ProxyReplyCode` 是那个方法字节）；版本字节不是 `5` 的是 `Socks5VersionMismatch`。
 
 ### 3.2 用户名/口令子协商（RFC 1929）
 
@@ -185,7 +189,7 @@ sequenceDiagram
 | 口令长度 | 1 | 1–255 |
 | 口令 | N | UTF-8 |
 
-〔决策〕用户名或口令编码后超过 255 字节时，**在本地拒绝**（`InvalidConfiguration`），不截断。
+〔决策〕用户名或口令编码后超过 255 字节时，**在本地拒绝**（`InvalidConfiguration`，种类 `Socks5CredentialsTooLong`），不截断。
 应答两个字节：子协商版本与状态；状态非 0 判 `ProxyAuthFailed`（凭据被拒）。
 
 ### 3.3 连接请求
@@ -217,7 +221,8 @@ sequenceDiagram
 | 7 | 不支持的命令 |
 | 8 | 不支持的地址类型 |
 
-非 0 一律判 `ProxyRefused`。
+非 0 一律判 `ProxyRefused`，种类 `Socks5ConnectRefused`，结果码在 `ProxyReplyCode` —— 界面按它说「规则不允许」「目标拒绝连接」……，不解析句子。
+应答里的地址类型不是 1 / 3 / 4 时判 `ProxyRefused`，种类 `Socks5InvalidAddressType`（`ProxyReplyCode` 是那个字节）。
 
 ---
 
@@ -252,14 +257,14 @@ sequenceDiagram
 
 ### 4.2 响应
 
-- 读到第一个空行（`CRLF CRLF`）为止；响应头上限 16 KiB，超过判 `ProxyRefused`。
+- 读到第一个空行（`CRLF CRLF`）为止；响应头上限 16 KiB，超过判 `ProxyRefused`（种类 `HttpProxyResponseTooLarge`）；对端回的根本不是 HTTP 应答是 `HttpProxyNotHttp`。
 - 状态码 2xx 成功；多读到的字节交还给上层（§2.3）。
 - 〔决策〕1xx（101 除外）是中间响应，跳过它接着读最终响应（RFC 9110 §15.2）；几个中间响应合起来也受响应头的长度上限约束。
   〔历史〕早期当成拒绝。
 - 407：没配凭据判 `ProxyAuthRequired`；配了（说明凭据被拒）判 `ProxyAuthFailed`，
   `Detail` 带上 `Proxy-Authenticate` 头的值。〔决策〕两者分开：一个是「去配」，一个是「改对」；曾经共用 `ProxyAuthRequired`，
   宿主只好自己靠「有没有配凭据」来分。
-- 其它状态码判 `ProxyRefused`，`Detail` 带状态行。
+- 其它状态码判 `ProxyRefused`，`Detail` 带状态行；种类 `HttpConnectRefused`，`ProxyReplyCode` 是状态码、`ProxyReply` 是状态行原样（来自代理，未清洗）。
 - 〔决策〕目标端口是 22 而代理回了 403 / 405 / 501 时，消息里**直接给出建议**：
   「这个代理可能只放行 80/443 —— 请改用 SOCKS5，或让服务端在 443 上监听」。
   这是一个高频、而用户完全猜不到的失败（`08-failures.md` §5.2）。
@@ -310,7 +315,7 @@ sequenceDiagram
 - 目标地址**从跳板的视角**解析（§2.1）。
 - `direct-tcpip` 的来源地址填 `127.0.0.1`、端口 `0`：我们没有一个真实的来源套接字，
   编造一个看起来真实的地址只会误导服务端的日志。
-- 通道被拒判 `ProxyRefused`，`Detail` 带 `CHANNEL_OPEN_FAILURE` 的原因码与描述；
+- 通道被拒判 `ProxyRefused`（种类 `JumpForwardRefused`，内层是带种类的通道异常），`Detail` 带 `CHANNEL_OPEN_FAILURE` 的原因码与描述；
   跳板的建连失败原样抛出，但 `Hops` 标明失败在跳板那一跳。〔决策〕**跳板自己的认证没过，仍抛 `SshAuthenticationException`**：逐条尝试记录与服务端给的方法留在最外层，消息里说清是哪一跳（更深一跳已经这样报过的原样往外传，不再套一层）。〔历史〕曾经改写成 `SshConnectException`，那些结构化信息只剩在 `InnerException` 里，宿主把它当成「连不上」而不是「认证失败」。
   〔决策〕**只有 `CHANNEL_OPEN_FAILURE` 才是「不肯转发」。**开隧道时跳板自己断了、违反了协议，照它自己的原因码报
   （`ClosedByPeer` 可重试，`ProtocolError` 不可），`Hops` 照样标出转发那一跳。曾经一律改写成 `ProxyRefused`，断线被说成了「跳板拒绝」。
@@ -319,6 +324,8 @@ sequenceDiagram
 - 跳板连接中途断开时，流的读抛出跳板连接的故障（**不是**读到结尾，`05-connection.md` §4.4）、写入失败 ——
   目标连接随之断开，这是预期的。通道被正常关掉（跳板那头发了 EOF / CLOSE）时读才是读到结尾。
 - 跳板上的主机密钥裁决与认证都让外层的连接计时器停表；外层计时器在这一跳里到点时报的是哪一跳超时（§2.4）。
+- 种类（`SshConnectException.FailureKind`，`Via` 是跳板、`Target` 是目标）：连不上跳板 `JumpConnectFailed`（原因码沿用那一跳的，那一跳的异常在内层）、
+  经跳板建连超时 `JumpConnectTimeout`、不肯转发 `JumpForwardRefused`、转发时出问题（跳板断了、违反协议）`JumpForwardFailed`、转发超时 `JumpForwardTimeout`。
 
 ### 5.1 通道作为字节流
 
@@ -350,7 +357,7 @@ sequenceDiagram
 - 〔决策〕**以 `-` 开头的值同样不代入**（同一个失败）。字符全都合法，值本身照样能变成别的东西：模板里的 `nc` / `ncat` / `socat` / `ssh`
   会把 `-e`、`-oProxyUseFdpass` 这样的值当成**选项**解析 —— 那是参数注入（与 Git 的 CVE-2017-1000117 同一类）。
   合法的主机名与用户名不以 `-` 开头。
-- 程序在连上之前退出（还没在 stdout 上输出任何数据）：判 `ProxyRefused`（`Phase` 为 `Dialing`），消息带退出码与 stderr 末尾（不截断，最多 4096 个字符），
+- 程序在连上之前退出（还没在 stdout 上输出任何数据）：判 `ProxyRefused`（`Phase` 为 `Dialing`，种类 `ProxyCommandExited`：`Via` 是命令行、`ProxyReplyCode` 是退出码、`ProxyReply` 是 stderr 末尾），消息带退出码与 stderr 末尾（不截断，最多 4096 个字符），
   `Hops` 带上 `ProxyCommand` 这一跳。〔决策〕曾经抛的是 `IOException`，建连路上被归成「对端断开」，消息还被截到 256 个字符 ——
   代理程序往往只在 stderr 的最后一行说明原因，截掉的正是那一段。输出过数据之后才以非零退出码结束的，是连接断了（`ClosedByPeer`），消息里同样带 stderr。
 - 本机的 shell 起不来（`ComSpec` 指向的程序不在、没有执行权限）：判 `InvalidConfiguration` —— 重试不会好。

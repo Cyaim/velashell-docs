@@ -107,6 +107,9 @@ read nothing back.
 - Creating, starting, rebuilding after an edit, automatic reconnect and start-up auto-start all carry it through the same
   `CreateTunnelAsync` into both kinds of library forward options. The library fixes the allowance when the forwarder is built, so a change
   takes effect when the tunnel is restarted — running tunnels cannot be edited anyway.
+- Bursts never exceed one second's allowance (since 2026-10-25): the library splits a large read into segments of at most 32 KiB and
+  releases them one by one ([spec/07 §5.1](../ssh/spec/07-forwarding.md)), so the rate and per-connection byte counts on the panel climb
+  steadily instead of stalling for seconds and then jumping.
 
 ### Remote dynamic SOCKS and the allow list (2026-10-24)
 

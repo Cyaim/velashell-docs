@@ -16,7 +16,7 @@ is documented on `Core/Notifications/INotificationCenter`; read it before adding
 
 | | Message center | Runtime alerts |
 | --- | --- | --- |
-| Examples | Update available, product news, CVE advisories | Fingerprint change, session drop, transfer failure |
+| Examples | Update available, product news, CVE advisories, last run ended unexpectedly, local encryption key could not be read, external-edit drafts left by the last run | Fingerprint change, session drop, transfer failure |
 | Presentation | Bell badge + list, revisitable | Dialog / status bar / tab flash, gone once seen |
 | Retention | Across restarts (SonnetDB `notifications`) | None (security events also go to the audit log) |
 | Owner | `INotificationCenter` | `ISecurityAlertService` / individual panels |
@@ -37,7 +37,7 @@ is clamped back into view when it would leave, and the position is written on mo
 - **Each message**:
   - Unread rows carry a 2px accent bar on the left with a primary-colour Medium title; read rows fall
     back to secondary colour and normal weight
-  - First line: kind badge (News / Update / Security / Offer; `warning` and `critical` severities
+  - First line: kind badge (News / Update / Security / Offer / System; `warning` and `critical` severities
     switch to an outlined warning colour) + relative time
   - Title (wraps), body (two lines max, then ellipsis)
   - Destination line, **justified**: host name pinned left, action label + `›` pinned right, and only
@@ -97,7 +97,7 @@ The Windows and macOS update flows are unchanged.
 
 - Notes use static manifests only, without querying releases or falling back to the anonymous Release API. `latest.json` retains `version` / `tag` / `assets` and adds optional `releaseNotes`: complete Markdown `body`, ISO 8601 or null `publishedAt`, and release-page address or null `htmlUrl`. Notes and the installation candidate come from the same response. Notes remain readable without valid platform assets, but no update action is offered.
 - “Update now” on writable Windows / macOS installations downloads **the currently displayed manifest snapshot** (tag, version, asset URL, checksum), without querying latest again or letting background discovery change the target. Completion only marks the download ready and waits for the user to choose restart to update. A download with no selected target reports a failure rather than readiness; if the package was deleted or altered before the swap, it is removed and the ready state dropped, so the next check or Update now downloads it again, while other restart failures keep the ready state for a direct retry. Closing the notes dialog leaves the download running; About takes over the same task's progress, failure state, and restart action. Do not replace a running task or a ready package: reuse the same target, or report a conflict for a different target.
-- On Linux / read-only installations the notes dialog shows “Go to release page” and opens **the selected tag's release page**, not the generic list used by the Check for Updates path above. The user downloads and installs manually. Microsoft Store builds can read notes, but updates remain Store-managed, with no in-app download/install action.
+- On Linux / read-only installations the notes dialog shows “Go to release page” and opens **the selected tag's release page**, not the generic list used by the Check for Updates path above (since 2026-10-25 only this repository's releases pages are allowed; a missing or failing manifest link falls back to this repository's releases list). The user downloads and installs manually. Microsoft Store builds can read notes, but updates remain Store-managed, with no in-app download/install action.
 - **Historical attachments are a prerequisite**: reading an installed historical tag requires `latest.json` on that Release. A missing attachment reports current-version notes unavailable, possibly a local build or a version without a release notes manifest, without an anonymous API fallback. An existing manifest without `releaseNotes` retains the tag and shows an empty body. Failure to discover latest is reported separately while still trying the installed version's notes; it must not mean “no update.”
 - The release workflow reads Release notes with authentication, writes the manifest, then calculates `SHA256SUMS.txt`. Editing a release or using `notes_only` only synchronizes notes in an existing manifest and its checksum, without rebuilding packages. A missing original manifest alone is rebuilt as `latest.json` from the hashes in `SHA256SUMS.txt` and the sizes of the assets on the Release (a missing package or checksum record for any platform still fails). A missing checksum file requires a full release first; `notes_only` cannot create it. With both absent (most likely while the build is still running) the job emits a notice and skips. Work for one tag is serialized, but the two attachment uploads are not atomic and may need a rerun after failure. The workflow must reach the default branch and generate / backfill the target attachments before the notes fields are available.
 
@@ -247,6 +247,36 @@ check runs; if a newer version exists, a message is posted that lands on the Abo
 > the General page. Update channel remains unwired and stays hidden; automatic download was wired on 2026-10-24 (settings
 > audit R-03).
 
+## 4A. Local content source: the local encryption key (since 2026-10-25)
+
+The first step of master password protection handed the local encryption key to the system keychain (the macOS keychain / the Linux Secret Service; Windows
+keeps the DPAPI-wrapped key file — see the 2026-10-25 erratum at the top of [system-keychain-and-sudo-credential-fill-feasibility-research.md](system-keychain-and-sudo-credential-fill-feasibility-research.md)).
+The key is resolved once at start-up; when the result has something the user should know, a "System" message is posted instead of a start-up dialog —
+for the same reason as the crash notice. These messages explain why saved passwords cannot be decrypted, and users usually come looking for that
+after being asked for a password when connecting, so they are kept and can be read again. A successful move into the keychain and the normal Windows
+case post nothing.
+
+| Situation | id (de-duplication) | Severity | Title |
+| --- | --- | --- | --- |
+| The key file in the data directory could not be unlocked (another system account, a reinstall, copied from another computer); it was renamed and kept, and a new key created | `master-key:replaced:<kept file name>`, once | Warning | "The local encryption key could not be used and was replaced"; the body names the kept file |
+| A key the data directory refers to is not in this computer's system keychain (data directory copied from elsewhere, entry deleted) | `master-key:missing:<ids…>`, once per set of ids | Warning | "A previous encryption key is not in the system keychain" |
+| The system keychain could not be opened this time (keyring locked, no session bus, authorization refused) | `master-key:unavailable:<date>`, once a day | Warning | "The system keychain is unavailable right now"; the body says the passwords are not lost and are read as usual on the next start once it is back |
+| Never migrated and the keychain is unusable, so the key stays in the data directory's key file | `master-key:file-fallback`, once | Info | "The encryption key is still stored in the data directory" |
+
+- No action link: the way back is re-entering the password in the login dialog when connecting (existing behaviour).
+- Posted in parallel with the update check, which may spend minutes downloading in the background, so these do not queue behind it; the periodic feed refresh does not post them again.
+
+## 4B. Local content source: external-edit drafts (since 2026-10-25)
+
+Each external-edit draft left by the last run (a session still open when the app crashed, a copy deliberately kept after a failed upload; see “Crashes and drafts” in [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §6 for how drafts are told apart) gets one message:
+
+- Kind "System", warning; id `remote-edit-draft:<subdirectory name>` — republished at every start and de-duplicated by that id, keeping its read state.
+- Title "External edit not uploaded"; the body says which file, which path on which machine, and where the local copy is; an old copy without a state marker cannot name the remote path and says instead that it "may contain changes that were not uploaded".
+- The action "Open folder" runs `commandId = files.remoteEditDrafts.open` (the command palette has "Open external edit drafts folder" too): with a single draft it opens that subdirectory, otherwise the `remote-edit` root,
+  with each draft's full path in its body. A message-center action is just a command without parameters, so a draft cannot be re-uploaded from here — that needs a connection to that server first, and the session went away with the last run.
+- The publication time is when the draft was first found, not its modification time: the list is sorted by publication time and drops the oldest past 200, so a draft from months ago would sink to the bottom or be pushed out right away.
+- Once a draft has been deleted (the user dealt with it), its message is removed at the next start. Posted only at start-up (the directory scan runs on the thread pool); a draft left during a run is reported in the file panel on the spot and listed at the next start.
+
 ## 5. Storage and limits
 
 - Location: SonnetDB document collection `notifications`, a single `inbox` document (through `IAppDataStore`)
@@ -273,10 +303,10 @@ The timer ticks on a fixed half-hour, and the interval setting decides whether a
 
 ## 7. Not done yet
 
-- **Plugin-published notifications**: the SDK's `IUiApi` only has `ShowPanelAsync` today. The host-side
-  interface is already shaped for this (`commandId` navigation works for plugin-registered commands),
-  but actually opening it to plugins means changing the velashell-plugin-sdk repository, extending the
-  isolated-process IPC protocol, and going through the SDK release process — a separate batch.
+- **Plugin-published notifications**: the contract (`IUiApi.PostNotificationAsync`, `ui/notify`) is on velashell-plugin-sdk's dev, unpublished, and the host has not
+  wired it yet (see [SDK reference §3.7](../sdk/sdk-reference.md)); until then `IUiApi` only has `ShowPanelAsync`. The host-side interface is already shaped for this
+  (`commandId` navigation works for plugin-registered commands); what remains after the SDK release is on the host side: delivery on the in-process and
+  isolated routes, the 6-per-plugin-per-minute rate limit, per-plugin muting on the plugin management page, a source field on messages and per-plugin cleanup on uninstall.
 - **OS-level notifications** (Windows notification centre / macOS notifications): everything is in-app
   for now.
 - **Grouping and search**: with a 200-item cap, the "Unread" filter is enough for the moment.

@@ -224,19 +224,20 @@ Both names are sent, and they share one implementation.
 - 〔Note〕The coordinates of nistp521 are 66 bytes (521 bits); `0x04 ‖ X ‖ Y` totals 133 bytes.
   Implementations that hard-code an assumption of 64 or 65 bytes will crash on this curve.
 
-### 3.4 `diffie-hellman-group14-sha256` / `group16-sha512` (RFC 8268)
+### 3.4 `diffie-hellman-group14-sha256` / `group16-sha512` / `group18-sha512` (RFC 8268)
 
 | Name | Group | Hash |
 | --- | --- | --- |
 | `diffie-hellman-group14-sha256` | MODP 2048-bit (RFC 3526 Group 14) | SHA-256 |
 | `diffie-hellman-group16-sha512` | MODP 4096-bit (RFC 3526 Group 16) | SHA-512 |
+| `diffie-hellman-group18-sha512` | MODP 8192-bit (RFC 3526 Group 18) | SHA-512 |
 | `diffie-hellman-group14-sha1` | Group 14 | SHA-1. **Off by default**, 〔Interop〕old devices |
 
 - `e = g^x mod p` (client), `f = g^y mod p` (server), both as `mpint`.
 - `K = f^x mod p`, as `mpint`.
 - **MUST validate** `1 < e,f < p-1`. Not validating amounts to accepting small-subgroup attacks.
 - The bit length of the private exponent `x` **SHOULD** be at least twice the hash output (the recommendation of RFC 4253 §8).
-  〔Decision〕Uniformly use **2× the hash length** (group14-sha256 → 512 bits), not the full bit width of the group ——
+  〔Decision〕Uniformly use **2× the hash length** (group14-sha256 → 512 bits, group16 / group18 → 1024 bits), not the full bit width of the group ——
   the full width brings no additional security, it only makes modular exponentiation much slower.
 
 ### 3.5 `diffie-hellman-group-exchange-sha256` (RFC 4419)
@@ -576,16 +577,21 @@ flowchart TD
     A[KEX REPLY received] --> B{Signature algorithm name<br/>== negotiated<br/>host key algorithm?}
     B -->|No| X[ProtocolError, disconnect]
     B -->|Yes| C{K_S type string<br/>matches the algorithm?<br/>RSA: mind §5.1}
-    C -->|No| X
+    C -->|No| X1[HostKeyRejected, disconnect<br/>HostKeyAlgorithmMismatch]
     C -->|Yes| D{RSA and modulus<br/>< MinimumRsaKeyBits?}
-    D -->|Yes| X2[HostKeyRejected, disconnect]
+    D -->|Yes| X2[HostKeyRejected, disconnect<br/>HostKeyTooShort]
     D -->|No| E[Compute H]
     E --> F{Verify sig H with K_S}
-    F -->|Failure| X3[HostKeyRejected, disconnect]
+    F -->|Failure| X3[HostKeyRejected, disconnect<br/>HostKeySignatureInvalid]
     F -->|Success| G[IHostKeyPolicy rules on K_S]
-    G -->|Reject| X4[HostKeyRejected, disconnect<br/>with the reason given by the policy]
+    G -->|Reject| X4[HostKeyRejected / HostKeyChanged, disconnect<br/>HostKeyPolicyRejected, with the reason given by the policy]
     G -->|Accept| H[Continue, send NEWKEYS]
 ```
+
+Each rejection exit names its kind in `SshConnectException.FailureKind` (`08-failures.md` §2): a `K_S` that cannot be parsed is `HostKeyRejected` + `HostKeyMalformed`;
+a type string that does not match the negotiated algorithm (including a certificate algorithm negotiated while `K_S` is not a certificate, or the reverse) is `HostKeyRejected` + `HostKeyAlgorithmMismatch`, with `HostKeyType` / `HostKeyAlgorithm` —
+〔History〕this chart used to draw that check as leaving through the `ProtocolError` exit, while the implementation has always reported `HostKeyRejected`; an RSA key that is too short carries `HostKeyBits` / `MinimumHostKeyBits`.
+These four happen before the policy is asked and the message is the library's; when the policy rejects, the kind is `HostKeyPolicyRejected` (`HostKeyPolicyRejectedWithoutReason` when the verdict carries no reason) and the message is the policy's reason.
 
 **Three reasons for the order**:
 
@@ -640,7 +646,7 @@ ValueTask<SshHostKeyVerdict> EvaluateAsync(SshHostKeyContext context, Cancellati
   centring puts `(17 − length) / 2` rounded down on the left and the rest on the right. The bottom border centres `[SHA256]` the same way. The sides are `|`. Lines are joined with `\n`.
 
 An `SshHostKeyVerdict` can only be obtained from four factory members: `Accept` / `AcceptAndPersist` / `Reject(message)` / `RejectChanged(message)`.
-**A rejection MUST carry a reason text**, which goes verbatim into `SshConnectException.Message` ——
+**A rejection MUST carry a reason text**, which goes verbatim into `SshConnectException.Message` (with `FailureKind = HostKeyPolicyRejected` marking it as the policy's words, which the library does not rewrite) ——
 this directly targets "the user only sees a bare UntrustedPeer and doesn't know where to delete the record".
 The reason code is determined by the kind of rejection (`SshHostKeyVerdict.Reason`): `Reject` is `HostKeyRejected`;
 `RejectChanged` is `HostKeyChanged` —— the recorded key has changed, or only other types are recorded (the next decision), possibly a man-in-the-middle.

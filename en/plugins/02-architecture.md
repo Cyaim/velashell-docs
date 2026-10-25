@@ -153,7 +153,7 @@ log directory, in a `plugins/` subdirectory of the same `logs/` that holds the h
   on the host side: what the plugin writes through `context.Log` (`IPluginLogger`; called directly in-process, relayed over RPC from isolated
   processes), the isolated process's stdout / stderr, and the activation / activation-failure / crash entries the host records for the plugin;
   the copy in the host log stays as before. A plugin's `Trace.WriteLine` does not reach this file (in an isolated process it is not collected anywhere). The file is deleted with the plugin's
-  data on uninstall; diagnostic bundles still take only the host logs, not this subdirectory. "View log" on each row of the plugin management
+  data on uninstall; diagnostic bundles take only the host logs by default; since 2026-10-25 this plugin's log can be ticked when exporting (masked the same way). "View log" on each row of the plugin management
   page shows the tail (256 KB by default, updated by Refresh; no live follow).
 - **i18n**: Contribution-point text uses indirect `%key%` addressing, and `plugin.nls.<locale>.json` provides translations. The host resolves the text using the current language before rendering, and language-switch events are pushed to active plugins.
 - **Telemetry**: None (consistent with the current main application); local crash-count statistics are reserved for backoff decisions.

@@ -356,8 +356,8 @@ graph TD
     style E fill:#1d3557,color:#fff
 ```
 
-**敏感字段静态加密**：密码、私钥口令、同步令牌经 `ISecretProtector`（AES-256-GCM + 本地密钥文件
-`~/.velashell/secret.key`，密文前缀 `enc1:`）落盘。共享凭据（`shared_credentials`）的密码与私钥口令同样如此；
+**敏感字段静态加密**：密码、私钥口令、同步令牌经 `ISecretProtector`（AES-256-GCM + 本机加密密钥，密文前缀 `enc1:`）落盘；密钥 2026-10-25 起在 macOS / Linux 上存进系统密钥链
+（数据目录里只有条目清单 `~/.velashell/secret.key.ref`，密钥链用不了时才回落到 `~/.velashell/secret.key`），Windows 上是 DPAPI 包裹的 `secret.key`。共享凭据（`shared_credentials`）的密码与私钥口令同样如此；
 引用了共享凭据的连接配置（`CredentialSource` 非空），会话仓储在落盘那一刻把它的认证材料（密码、私钥路径、口令、
 证书路径）一律清掉 —— 放在仓储而不是各个保存点，是因为保存点有七八处，逐个防守迟早漏一个。
 
@@ -372,6 +372,11 @@ graph TD
 删掉的记在 `HiddenBuiltInIds`，改过的存成同标识的自定义命令，显示时由 `QuickCommandCatalog.VisibleBuiltIns` 合成。
 组内顺序存在分组的 `CommandOrder`（命令标识表，可含内置命令；空表 = 默认顺序），内置分组之间的先后沿用存档的 `SortOrder`。
 这几样在 Gist 快照里同样只是加出来的字段，schema 仍是 v2：旧客户端读到时忽略，再推一次会把它们抹掉（只丢偏好，不丢命令）。
+
+布局模板（2026-10-25 起随 Gist 同步）走的是另一条路：经 `Core/Layouts/LayoutTemplateStore`（DI 单例，界面与同步服务共用一个实例，读改写在一把锁里）读写 `layout_templates` / `layout_template_tombstones`，
+界面与同步服务都不直接碰这两个集合。Gist 里单独一个 `velashell-layouts.json`、自带 `schemaVersion`，按模板 Id 合并、墓碑保留 180 天，合并规则在 `LayoutTemplateMerge`（纯函数）。
+之所以不像快捷命令那样「只加字段」：旧客户端整份推回去会抹掉新段连同墓碑，而单独的文件它碰不到。模板、节点、标签三层带 `JsonExtensionData`，更新版本加的字段原样往返；
+本机的增删改报 `Changed`（自动同步据此防抖推送），同步写进来的报 `SyncApplied`（管理窗口回到界面线程重读，不再触发推送）。
 
 ### ⚠️ SonnetDB 的几处方言坑
 

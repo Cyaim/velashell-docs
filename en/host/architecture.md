@@ -432,8 +432,9 @@ graph TD
 ```
 
 **Sensitive fields are encrypted at rest**: passwords, key passphrases and sync tokens go through
-`ISecretProtector` (AES-256-GCM plus the local key file `~/.velashell/secret.key`, ciphertext
-prefixed `enc1:`). The passwords and key passphrases of shared credentials (`shared_credentials`) are treated the same
+`ISecretProtector` (AES-256-GCM plus the local encryption key, ciphertext prefixed `enc1:`); since 2026-10-25 the key
+lives in the system keychain on macOS / Linux (the data directory holds only the entry list `~/.velashell/secret.key.ref`,
+falling back to `~/.velashell/secret.key` when the keychain is unavailable), and in the DPAPI-wrapped `secret.key` on Windows. The passwords and key passphrases of shared credentials (`shared_credentials`) are treated the same
 way; for a connection profile that references a shared credential (`CredentialSource` set), the session repository
 clears its authentication material (password, private-key path, passphrase, certificate path) at the moment it is
 written — enforced in the repository rather than at each save site, because there are seven or eight of them and
@@ -457,6 +458,11 @@ command ids that may include built-ins; empty = default order), and the order of
 keeps the stored `SortOrder`. In the Gist snapshot these are added fields as well and the schema stays
 v2: older clients ignore them, and pushing again from one wipes them (only preferences are lost, never
 commands).
+
+Layout templates (synced through the Gist since 2026-10-25) take a different route: they are read and written through `Core/Layouts/LayoutTemplateStore` (a DI singleton shared by the UI and the sync service, with read-modify-write under one lock) in `layout_templates` / `layout_template_tombstones`,
+and neither the UI nor the sync service touches those collections directly. The Gist holds a separate `velashell-layouts.json` with its own `schemaVersion`, merged per template id with tombstones kept for 180 days; the merge rules are in `LayoutTemplateMerge` (a pure function).
+They do not "just add fields" like quick commands because an older client pushing the whole payload back would wipe a new section together with its tombstones, while a separate file is out of its reach. Templates, nodes and tabs carry `JsonExtensionData`, so fields added by newer versions round-trip unchanged;
+local changes raise `Changed` (automatic sync debounces a push on it), and writes from sync raise `SyncApplied` (the manage window reloads on the UI thread without triggering another push).
 
 ### ⚠️ SonnetDB dialect traps
 

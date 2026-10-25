@@ -133,14 +133,17 @@ neither the CLI nor the templates are allowed to touch it.
 
 ### Where the version number lives (maintained by the script)
 
-After the split only four places are left in this repository:
+After the split only four places are left, two of them in velashell-docs:
 
 | Location | What goes wrong if it is missed |
 | --- | --- |
 | `VelaSdkVersion` in `Directory.Build.props` | The package version is wrong |
 | `SdkVersion` in `src/VelaShell.PluginSdk/VelaPluginApi.cs` | **Nothing reports an error**; `vela-plugin doctor` simply reports the wrong host SDK version from then on, and plugins' `minSdkVersion` gate is judged wrongly with it |
-| The version banner in `docs/sdk-reference.md` | A stale number for people to copy |
-| The version banner in `docs-en/sdk-reference.md` | Same as above |
+| The version banner in velashell-docs' `zh/sdk/sdk-reference.md` | A stale number for people to copy |
+| The version banner in velashell-docs' `en/sdk/sdk-reference.md` | Same as above |
+
+The last two live in another repository and are **optional** locations: the script updates them only when it finds that repository through
+`-DocsRoot` / `$env:VELASHELL_DOCS` / a sibling `../velashell-docs`, and skips them with a warning otherwise.
 
 `pwsh scripts/Set-Version.ps1 <version>` changes them all in one go. CI runs it with `-Check` as a health check.
 

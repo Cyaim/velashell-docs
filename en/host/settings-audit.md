@@ -32,7 +32,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | C-01 | P0 | Terminal Bell, visual flash | Actual runtime conflict | `VisualBell=true` overrides "system alert sound" and "silent", because the actual condition is `VisualBell \|\| BellMode == "visual"` | Remove the standalone `VisualBell`; retain only the three-state Bell setting: "system alert sound / visual flash / no alert"; migrate old configuration | `AppSettings.cs:222,226`;`VelaTerminalControl.cs:217-220,472`;`MainWindowViewModel.cs:1565-1566` | ✅ Done (2026-07-11): `BellMode` is now the sole authority; `VisualBell` is retained only as a migration slot. When the two settings services load, `AppSettings.Normalize()` migrates them to `BellMode=visual` and clears the old value; the terminal control property and independent settings page toggle have been removed |
 | C-02 | P1 | Maximum retries | Multiple runtime authorities | `General.MaxRetries` in settings controls part of the automatic reconnect flow, but `TerminalTabViewModel` still hardcodes the maximum number of attempts as 3 | Rename to "Maximum automatic reconnect attempts" and make all automatic reconnect paths read the same value | `AppSettings.cs:65`;`MainWindowViewModel.cs:1325`;`TerminalTabViewModel.cs:297` | ✅ Done: `TerminalTabViewModel.MaxReconnectAttempts` is now a writable property supplied by the host according to the setting during disconnect handling; the UI was renamed "Maximum automatic reconnect attempts" and moved into the subordinate "Behavior > Automatic reconnect" position (range 1 to 20) |
 | C-03 | P1 | Confirm before closing, minimize to tray | Unspecified priority | When minimize to tray is enabled, closing the window first minimizes it and does not enter the close confirmation flow | Rename to "Confirm before exiting the application" and explain in the description that it is not triggered when minimizing to tray | `AppSettings.cs:55,78`;`MainWindow.axaml.cs:297-310` | ✅ Done: renamed "Confirm before exiting the application"; the description clarifies tray precedence; the tray item description also says that the application actually exits only through the tray menu's "Exit" command |
-| C-04 | P1 | Show hidden files | Settings and session state are inconsistent | The file browser toolbar modifies only the current ViewModel and does not write back to persistent settings | Recommend writing toolbar toggles back to `Transfer.ShowHiddenFiles`; otherwise remove it from the Settings Center and make it explicitly a session state | `AppSettings.cs:276`;`MainWindowViewModel.cs:508`;`FileBrowserViewModel.cs:80,248-260` | ✅ Done: the toolbar toggle writes back and saves `Transfer.ShowHiddenFiles` through the `ShowHiddenFilesToggled` callback; after settings are saved, all open file panels are synchronized through a broadcast; the settings page description documents the linkage between both locations |
+| C-04 | P1 | Show hidden files | Settings and session state are inconsistent | The file browser toolbar modifies only the current ViewModel and does not write back to persistent settings | Recommend writing toolbar toggles back to `Transfer.ShowHiddenFiles`; otherwise remove it from the Settings Center and make it explicitly a session state | `AppSettings.cs:276`;`MainWindowViewModel.cs:508`;`FileBrowserViewModel.cs:80,248-260` | ✅ Done: the toolbar toggle writes back and saves `Transfer.ShowHiddenFiles` through the `ShowHiddenFilesToggled` callback; after settings are saved, all open file panels are synchronized through a broadcast; the settings page description documents the linkage between both locations; since 2026-10-25 this also covers the remote panes of single- and dual-pane file tabs (they previously neither read nor wrote it) |
 | C-05 | P1 | Scrollback line count | Inconsistent default value | The settings model defaults to 50000, while `SettingsViewModel` defaults to 10000 | Keep only one source for the default value; preferably provide it through `AppSettings` or a default configuration factory | `AppSettings.cs:19`;`SettingsViewModel.cs:114` | ✅ Done: the VM initial value now comes from `new AppSettings()` and no longer declares its own business default |
 | C-06 | P1 | Default language | Inconsistent default value | The settings model uses `zh-CN`, while the ViewModel uses `en` | Unify the source of the default value | `AppSettings.cs:8`;`SettingsViewModel.cs:90` | ✅ Done: as with C-05, the VM initial value now comes from the settings model |
 | C-07 | P1 | Cursor style | Inconsistent default value | The settings model uses `bar`, while the terminal control internally defaults to `block` | Apply the default from the settings model in the terminal control instead of declaring a business default independently | `AppSettings.cs:218`;`VelaTerminalControl.cs:145` | ✅ Done: the control default now matches the model (`bar`), with a comment explaining that the runtime value is supplied by `ApplyLiveTerminalSettings` |
@@ -69,7 +69,7 @@ The current Settings Center contains 9 top-level entries and approximately 80 vi
 | R-01 | P1 | Check for updates at startup | Disabled, unimplemented | Hide from ordinary settings | Update service and update source integration are complete | ✅ **Restored (2026-08-30)** — the condition is met: the message center uses it to decide whether to check for a new version at startup, and posts a message that opens the About page when one is found (see [message-center-and-feed.md](message-center-and-feed.md)). The switch previously had no consumer anywhere in the repository |
 | R-02 | P1 | Update channel | Disabled, unimplemented | Hide | Stable and preview update sources are supported | ✅ Hidden (the entire "Updates" group was removed; the About page's "Check for updates" was also changed to honestly say "The update service is not yet connected" instead of pretending that the application is up to date) |
 | R-03 | P1 | Download updates automatically | ~~Disabled, unimplemented~~ Implemented: when the startup check finds a new version it is downloaded and verified in the background, then a restart finishes the update | Show again | Automatic download and installation flow is complete | ✅ **Wired and shown (2026-10-24, nineteenth batch)**: Settings → General, right next to "Check for updates on startup", disabled while the check is off, and shown only on installations that can update in place (a writable directory on Windows / macOS); off by default, and a stored `true` left by the old default is turned off once by migration |
-| R-04 | P1 | Master password protection | Disabled, unimplemented | Hide | Key derivation, unlocking, and credential migration are fully implemented | ✅ Hidden (a comment explains that current credentials are encrypted with a local machine key) |
+| R-04 | P1 | Master password protection | Disabled, unimplemented | Hide | Key derivation, unlocking, and credential migration are fully implemented | ✅ Hidden (a comment explains that current credentials are encrypted with a local machine key). The first step (handing the local encryption key to the system keychain) was done on 2026-10-25, see the host's plan.md section of that day; the master password is in [master-password-design](master-password-design.md) |
 | R-05 | P2 | Tab bar position | ~~Disabled, Dock fixed at top~~ Implemented: the docking layer can put horizontal tab strips at the bottom of the pane | Show again | The Dock template truly supports switching between top and bottom | ✅ **Shown again (2026-10-24, fifteenth batch)**: Appearance → Window, between "Sidebar position" and "Show Tabs in Multiple Rows"; it governs horizontal tab strips only, and every pane changes together. Before, the docking layer could only put tabs at the top and `TabBarPosition` had no consumer |
 | R-06 | P1 | Load keys into Agent automatically | ~~Disabled, unimplemented~~ Implemented: after a successful private-key-file or certificate authentication, the key (together with the certificate for certificate authentication) is added to the local ssh-agent (like OpenSSH `AddKeysToAgent`) | Show again | `KeyOptions.AddKeysToAgent` now has a runtime consumer | ✅ Returned to the UI (2026-09-23, "SSH Agent" section of the Key Management page). The field was renamed from `AutoLoadToAgent` to `AddKeysToAgent` and is **off by default**: the old field defaulted to `true` but never had a consumer, so the `true` in existing configurations is not user consent. Since 2026-10-06 certificate authentication adds too ("certificate + private key"); when the OpenSSH agent service is not running it goes through the current user's Pageant (the SSH library's default endpoint, `ssh/spec/07-forwarding.md` §7.2) |
 | R-07 | P1 | Resume automatically | Disabled, duplicates interrupted transfer resume | Remove current UI | Return as a single setting after interrupted transfer resume is implemented | ✅ Returned as planned as the single "Resume interrupted transfers" setting (2026-07-23, see M-02) |
@@ -130,6 +130,8 @@ The following settings were reviewed against their runtime consumers, are effect
 | Shortcuts | This belongs in settings | Retain in the Settings Center | Renamed back to "Shortcuts": the global and tab bindings are customizable (A-08), and the page is generated from the factory table plus the current changes (C-10) |
 | About | An information page, not a setting | It can remain the final entry or be placed at the bottom of settings | Version, license, diagnostic information, and update entry ("Check for updates" now honestly says it is not connected) |
 
+> The "Verify login" and "Show problems only" switches in the title bar of the session health check window (since 2026-10-25, see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §11C) are window switches remembered only for this launch — **not settings**, not written to the settings file; the concurrency of 6 and the 30-second limit per host are constants. Do not mistake them for settings left unwired during an audit.
+
 ## 9. Recommended Information Architecture
 
 > Status: Not yet implemented as a whole (Phase 4). Local changes implemented in this batch: the General page was rearranged into "Startup and Window / Language / Connection Defaults / Data and Storage / Behavior", automatic reconnect settings were grouped, and the Terminal page gained a "Bell and Tab Alerts" group.
@@ -167,11 +169,12 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | Terminal | Scrolling | Auto-scroll while output is being received, scroll to bottom on keypress | Retain as independent settings |
 | Terminal | Clipboard and Selection | Copy on select, paste on right click, trim trailing spaces, select word on double-click, copy with Ctrl+C, confirm multiline paste | Order by input/output risk |
 | Terminal | Input and Session | IME, execute command after connection | A risk warning for startup commands would be more appropriate |
+| Terminal | Output Rules (a page of its own, right after "Terminal") | The user's highlight and auto-answer rule table (`TerminalBehavior.OutputRules`) | Exported / audited with the "Terminal" category; auto-answer acts only on the prompt line the cursor is on, and rules that would match a password prompt are refused (twenty-third batch) |
 | Connection | Connection Defaults | Default port, connection timeout, heartbeat interval | Move from General |
 | Connection | Automatic Reconnect | Automatic reconnect, maximum attempts, reconnect interval | Hide subordinate settings when automatic reconnect is disabled |
 | Connection | Authentication Preferences | Remember password, default authentication key | Provide a link to Key Management |
 | File Transfer | Paths and Editor | Local download directory, default editor | Retain |
-| File Transfer | Remote Editing | When double-clicking a file (`Transfer.DoubleClickAction`: system default program / built-in editor / configured editor, system default by default), upload after editing (`Transfer.AutoUploadOnEdit`, on by default) | Shown. Turning auto-upload off = local copies opened by external programs are not watched and nothing is uploaded on wrap-up either; the built-in editor's Save still uploads. The three entry points and the upload rules are in Interaction and UI Specs §6 |
+| File Transfer | Remote Editing | When double-clicking a file (`Transfer.DoubleClickAction`: system default program / built-in editor / configured editor, system default by default), upload after editing (`Transfer.AutoUploadOnEdit`, on by default) | Shown. Turning auto-upload off = local copies opened by external programs are not watched and nothing is uploaded on wrap-up either; the built-in editor's Save still uploads. The three entry points and the upload rules are in Interaction and UI Specs §6. Both settings descriptions were corrected on 2026-10-25: the double-click one no longer says all three upload automatically, and the auto-upload one says it only governs the external programs |
 | File Transfer | Transfer Behavior | Maximum concurrency, preserve timestamps (an SFTP upload sets the modification time on the same handle before closing, one round trip), flush uploads to disk (`Transfer.FsyncAfterUpload`, off by default: `fsync@openssh.com` before an SFTP upload is closed, skipped on servers without it, and a failed flush fails the upload), conflict handling, show hidden files, completion notification, delete remote folders with rm -rf (`Transfer.UseRecursiveDeleteCommand`, on by default) | The hidden-file state must be unified; the `rm -rf` entry must state three things: it applies **only to SSH sessions that have an exec channel** (standalone SFTP / FTP / plugin protocols always walk the tree over SFTP), it **falls back to the SFTP walk automatically** when the command is unavailable or exits non-zero, and **there is no per-entry progress** on that path (the bar goes indeterminate, and cancelling can only close the channel). The delete confirmation prompt is unchanged |
 | File Transfer | Bandwidth Limits | Master switch, upload limit, download limit | Hide both rate fields when disabled |
 | File Transfer | Transfer Logs | Record logs, retention days, storage path | Hide subordinate settings when logging is disabled |
@@ -274,6 +277,9 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | `src/VelaShell.Core/Sftp/SftpService.cs` | Consumers of bandwidth limit and timestamp settings |
 | `src/VelaShell/ViewModels/FileBrowserViewModel.cs` | Hidden files (toggle writes back to settings), completion notifications, and transfer logs |
 | `src/VelaShell.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs` | SSH timeout, heartbeat, and host fingerprint policies |
+| `src/VelaShell.Core/Models/OutputRule.cs`, `src/VelaShell.Core/OutputRules/` | Output rule model, compilation (linear-time engine) and password guard (twenty-third batch) |
+| `src/VelaShell.Terminal/Semantics/OutputTriggerScanner.cs` | Auto-answer decisions (cursor line only, no answer while typing locally, cooldown and per-minute limit) |
+| `src/VelaShell/ViewModels/OutputRulesViewModel.cs`, `src/VelaShell/Views/Settings/OutputRulesPage.axaml` | The "Output Rules" settings page |
 
 ## 14. Remediation Record
 
@@ -588,7 +594,26 @@ or `env | grep TOKEN` land on disk verbatim. A masking stage (`SessionOutputMask
 
 - **What is masked** (case-insensitive, erring on the side of masking): in `name=value` / `name: value` (JSON and YAML forms included; `grep --color` color sequences between the name and the separator do not get in the way) where the name contains password / passwd / passphrase / secret / token / api key / access key / private key / credential, only the value; the credential after `Bearer` / `Basic`; the body of PEM private key blocks (the BEGIN / END lines stay); tokens with a recognizable prefix (AWS `AKIA…` / `ASIA…`, GitHub `ghp_…` and friends, Slack `xox?-…`, `sk-…`). All become `***`. The current directory in `PWD=` is not a secret.
 - **Bytes and lines**: every byte maps to one Latin-1 character before matching; rules and replacements are ASCII, so UTF-8 and GBK round-trip unchanged. Only complete lines are matched; the trailing incomplete line is held back only when it stops in the middle of a value (or inside a private key block), up to 4 KB, while `Password: ` prompts waiting for input and full-screen programs that never print a newline pass through immediately. Whatever is held is masked and released when recording stops.
-- Not done: user-defined rules (meant to share a rule table with "custom highlight rules for terminal output", see `feature-plan.md`); bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
+- Not done: user-defined rules — the rule table now exists (the twenty-third batch, "Output Rules") but masking is not wired to it yet, see `feature-plan.md`; bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
+
+**2026-10-25 addendum** (the setting is unchanged; what is masked and how it is recognized changed):
+
+- **Control sequences are stripped before matching**: each line is first projected to its visible text — CSI and short ESC sequences take no position, while the start and the ST of OSC / DCS / SOS / PM / APC each keep one ESC as a boundary (text inside a title or an OSC 8 hyperlink still goes through the rules but never joins the text around it into one value);
+  broken sequences or ones longer than 256 bytes stay visible. All rules run on the visible text and positions are mapped back to the original. Keywords, tokens and values cut apart by grep highlighting, or values colored by jq / bat, are recognized all the same; control sequences inside a masked span are kept right after the `***`, so replay keeps colors and cursor state intact.
+  Context truncation never lands inside a control sequence.
+- **name=value / name: value**: a keyword in the name has to be a whole word — not when it is followed directly by a letter of the same case (`max_tokens`, `tokenizers`, `passwordless`, `SECRETARY` are not masked), while the next camel-case word, a digit, a separator or the end of the name count as boundaries;
+  a plural `s` still counts except for token (`credentials.json`, `client_secrets.json` are still masked). A host name in `user@host` is not taken as a key; with no whitespace after the colon, a value starting with `~` or `/` does not count (`host:~#` prompts, `host:/path`).
+  New keys without password-like words: names ending in `.key` (`tls.key`), names containing `key-data` (kubeconfig `client-key-data`), `.dockerconfigjson` / `.dockercfg`, and Docker `config.json`'s `"auth"` (only a quoted name with a string value).
+  Unquoted values: `name=value` still stops at whitespace; `name: value` (whitespace after the colon: YAML, HTTP headers, `kubectl describe`) is masked to the end of the line, stopping before the next key on the same line (an identifier directly followed by `=` or ": ") or a `#` comment, with an adjacent comma or semicolon left to the next key.
+  An escaped JSON string (`\"…\"`) cut off by a bare outer quote is masked up to that quote, and an empty value `\"\"` no longer masks a backslash.
+- **Others**: `Basic` only takes base64 whose length is a multiple of 4, that decodes, and that contains a colon (`Basic configuration` is left alone); `Bearer` does not take a purely alphabetic English word shorter than 20 characters (`Bearer authentication` is left alone).
+  Prefixed tokens add `github_pat_`. `.netrc` is matched in lower case only: a one-line `machine … login … password secret`, and, when split across lines, a `password secret` line on its own at the start of a line.
+- **Private key blocks**: PEM and OpenPGP (`PGP PRIVATE KEY BLOCK`). Inside a multi-line block only base64 body lines become `***` (line-number and file-name prefixes added by `cat -n`, `nl`, `grep -n` / `grep -A`, color sequences and line endings are kept);
+  blank lines and the `Proc-Type` / `DEK-Info` / `Version` / `Comment` / `Hash` / `Charset` / `MessageID` header lines go through the usual rules and the block continues; a line that cannot belong to a key block (an echoed BEGIN line, truncated output, a prompt) ends the block —
+  before, everything after entering a block was masked line by line with its control sequences erased, so echoing a single BEGIN line blinded the rest of a recording.
+- **What is held back**: besides "the trailing incomplete line is held only in the middle of a value (or inside a private key block)", the value of `name: value` and a netrc password line only end at the end of the line, so they are held until then;
+  an unfinished line inside a key block is held only while it could still be a body / header / END line, and a prompt containing `@ ~ $ # > %` and the like is released at once.
+- Still masked by mistake after the whole-word check: `token_type: Bearer`, `token_endpoint: https://…`, `secretName: tls-cert`, `token_count: 12`.
 
 ### 2026-10-24 Fifteenth batch (tab bar position shown again)
 
@@ -630,8 +655,8 @@ split layout too, as a subordinate option. Interaction: the layout templates sec
   The exit path does not query the store; whatever no longer matches at the next start (usually temporary profiles that were never saved, such
   as quick connections) is skipped silently.
 - **Not in the settings file**: the exit layout lives in the SonnetDB `layout_session` collection (one `last` document), named layout
-  templates in the `layout_templates` collection, one document per template; neither travels with settings export or cloud sync, and neither
-  holds passwords.
+  templates in the `layout_templates` collection, one document per template; neither travels with settings export, and neither holds passwords;
+  named templates can travel with cloud sync since 2026-10-25 (a separate file, see the twenty-second batch), while the exit layout is still not synced.
 - It defaults to off so that the existing default behavior of "Restore sessions" does not change; that option itself is untouched and still on
   by default.
 
@@ -666,7 +691,8 @@ every root-level property belongs to exactly one category):
   unticked too — a file from someone else should not quietly switch off external-launch confirmation or redirect outbound traffic.
 - **Secrets are never written**: the proxy password and the alert webhook URL are left out whether or not their category is ticked. There is
   no encrypted export: those two are the only real secrets in the settings, and moving secrets to another machine is what cloud sync's
-  end-to-end passphrase is for.
+  end-to-end passphrase is for. Since 2026-10-25 cloud sync without an end-to-end passphrase leaves these two out as well, and a pull keeps the
+  local values by the same rules as an import; an encrypted payload with a passphrase still carries them.
 - **Runtime state is not exported**: window size and position and the last open sessions (`lastOpenProfileIds`) are not written, and import
   keeps the local ones; one-time migration markers do travel (without them an import would migrate values the user already chose a second time).
 - **File shape**: still the `AppSettings` JSON, keeping only the selected blocks, plus an export header `velaShellExport` (format
@@ -720,10 +746,10 @@ nothing beyond the item being transferred, with nothing on disk, so it was wired
   down (tab closed, session dropped) — in batches started from a file panel such failures turn into "Paused", and "Resume" continues them on a
   new connection (the transfer queue, stored in the SonnetDB `transfer_queue` collection, restored as paused after a restart without
   connecting; not a setting).
-- Single- and dual-pane file tabs take a settings snapshot when they open (existing behavior), so after changing this value open file tabs
-  must be reopened; the terminal sidebar's file panel refreshes on save.
-- Known gap: resumed downloads and dual-pane relays read the SSH library's raw stream, so the exception on a dropped connection there is not
-  translated, goes unrecognized and is not retried.
+- After settings are saved, the terminal sidebar's file panel and open single- / dual-pane file tabs pick up the new value together (file tabs
+  since 2026-10-25; before, the tab had to be reopened).
+- Resumed downloads and dual-pane relays read a remote file stream that throws the neutral exceptions too (since 2026-10-25, `TranslatingSftpStream`), so a dropped
+  connection is retried as a temporary failure; before, that stream was the SSH library's raw one and its exceptions went unrecognized and were not retried.
 
 ### 2026-10-24 Nineteenth batch (download updates automatically wired up)
 
@@ -769,3 +795,61 @@ two OpenSSH interop items in the "Trusted hosts" section, followed by a new "Tru
   the command-line ssh, import once.
 - Trusting a host now also records its public key (only the fingerprint was stored before); older records get it the next time they are
   trusted on connect, and only then can the export write a host key line for them.
+
+### 2026-10-25 Twenty-first batch (first-connection fingerprint confirmation on by default)
+
+The **default of `Security.ConfirmFirstFingerprint` changes from off to on** (host side: the `plan.md` section of the same day). Interaction:
+[interaction-and-ui-specs.md](interaction-and-ui-specs.md), the host fingerprint confirmation item in §13.2.
+
+- **Why**: the user manual has always said that the first connection asks you to check the fingerprint. The trouble with TOFU is that the
+  first time is exactly when checking matters most — with someone on the path, the key recorded is the impostor's, and every later
+  connection "verifies" against it. On by default matches OpenSSH's `StrictHostKeyChecking=ask`.
+- **One-time migration**: a stored `false` cannot tell the old default from a user's choice, so it follows the same pattern as the
+  fingerprint-change block (fifth batch) — switch it on once, stamp `Security.FirstFingerprintDefaultMigrated`, and respect the user from
+  then on. The flag is registered as a migration field (`SettingsCategories.MigrationFields`), so the audit does not count it as a settings
+  change while export and sync still carry it (seventeenth batch).
+- **Behavior**: connections from anywhere in the UI, test connection and connection diagnostics, standalone SFTP, tunnels started by hand
+  or by "Establish when the app starts", plugin `open_session`, "Resume" in the transfer queue and external launches (after their
+  confirmation) all show the "Host Trust" dialog for an unseen host, and reject when there is no main window to show it on. Automatic
+  reconnects (the terminal countdown, the batch after waking from sleep, a tunnel's automatic redial) reject an unseen host without a
+  dialog and record a `hostkey-rejected` alert — with the old default off they quietly recorded it on first use. Hosts trusted "once"
+  are still let through for the rest of the run; hosts covered by a trusted host CA are unaffected (twentieth batch).
+- The switch keeps its place and wording; its description "When off, the fingerprint is recorded automatically on first connect (TOFU)"
+  still holds.
+
+### 2026-10-25 Twenty-second batch (layout templates sync through the cloud)
+
+The named layout templates of the sixteenth batch lived only on the local machine, neither in Gist sync nor in settings export. This batch lets them travel with cloud sync, and adds export / import to the manage window (not settings). Interaction: [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §4C.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Sync scope → Layout templates | On | On / Off (`SyncSettings.SyncLayoutTemplates`) | Under "Cloud Sync → Sync scope", after snippets; stored locally in `app_config/sync`, not in the sync payload. Description: "A separate file merged template by template; templates only record connection IDs, so another device needs the same connections (synced with connection profiles) to open them" |
+
+- **Consumer**: `GistSyncService.LayoutTemplatesInScope` (push, pull, reconcile and restoring a past version). A device with it off neither reads nor writes `velashell-layouts.json` in the Gist; not writing is not deleting, so other devices' templates stay.
+- **On by default**, like app settings, connection profiles and snippets: it goes through the Gist the user already has on, not a new outbound call; templates hold no secrets and are no more sensitive than the connection profiles already syncing (tab titles are often `user@host`, and profiles carry host and user names anyway).
+  Existing sync configurations lack the field and read as on, so the first sync after upgrading pushes the existing templates (`PRIVACY.md` says so).
+- **Why a separate file**: the main payload is pushed whole, so a new section inside it would be dropped by an older client when deserializing and wiped from the cloud when it pushes back (that is how §158's `HiddenBuiltInIds` were lost); older clients only read and write the main file and never touch this one.
+  Merging per template id with deletions kept as 180-day tombstones is described in §4C of the interaction specs; templates, nodes and tabs all carry `JsonExtensionData`, so fields added by newer versions round-trip unchanged.
+
+### 2026-10-25 Twenty-third batch (output rules: custom highlights and auto-answer)
+
+The built-in semantic highlighting is 7 compile-time regular expressions (`SemanticMatcher`) users cannot extend, and nothing in the code base did "output matches → send something". This batch adds one rule table shared by highlights and triggers / auto-answer, plus an "Output Rules" page in the settings window (after "Terminal", 15 pages in total). Interaction: [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §5.2, §5.2.3 and §14.6.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Output rule table | Empty | `TerminalBehavior.OutputRules`, at most 64 | The "Output Rules" page of the settings window; applies to open tabs on save (`TerminalSettingsApplier`); exported / imported and audited with the "Terminal" category, synced with app settings |
+| Rule: action | Highlight | `highlight` / `respond` | Unknown values do not take effect and are flagged on the page |
+| Rule: scope | Global | `global` / `group` / `profile` + `scopeId` | Local terminals take only global rules |
+| Rule: pattern / case sensitive / enabled | — / No / Yes | At most 512 characters, linear-time engine | Backreferences, lookarounds, atomic groups and conditionals are refused |
+| Highlight: text color / background / bold | No change / No change / No | Palette index 0–15 or empty | At least one; out-of-range indices load as "no change" |
+| Answer: text / then press Enter | Empty / Yes | At most 128 characters, one line of visible text | Empty text + Enter = just press Enter; rules that would match a password prompt are refused |
+| Answer: cooldown / per-minute limit | 2 s / 6 | 1–3600 / 1–30 | Clamped on load |
+| Answer: forward to sync channels | No | Yes / No | |
+
+- **It lives in the "Terminal" block**: fields are strings / nullable numbers (the document store's JSON has no enum converters); export / import and the audit follow the "Terminal" category and cloud sync follows app settings — it travels with the user like quick commands, with no category of its own in `SettingsCategories`.
+  `Normalize` clamps numbers, drops empty entries and truncates past 64; rules failing validation are not deleted but skipped by the compiler and flagged on the page. "Restore defaults" clears the table too.
+- **Rules sync with the settings, on the condition that the table never holds a password**: an auto-answer rule whose pattern literally mentions password-like words (password / passphrase / PIN / OTP / token / secret and their CJK equivalents), or that would match one of 15 common password prompts,
+  cannot be set to auto-answer (`OutputRuleSecretGuard`, erring on the side of refusing — patterns without keywords such as `:\s*$` or `.*` are caught too); for such a rule "Done" stays disabled in the editor, and a draft like that is dropped when the window's "Save" is clicked. Highlight rules are not restricted (marking "password" in red in a log is legitimate).
+- **Trigger rules** (`Terminal/Semantics/OutputTriggerScanner`): remote output only; only the logical line the cursor is on, main screen; no answer when there has been local input since the last Enter; wait for 300 ms of quiet; one answer per line; the cooldown postpones rather than drops, and the per-minute limit pauses for a minute;
+  not forwarded to sync input channels by default. Details in §5.2.3 of the interaction specs.
+- **Not done**: wiring recording and log masking (fourteenth batch) to this table so users can add their own masking rules — left in `feature-plan.md`; multi-step expect dialogs, variables and scoping by tab / marker are not done either.

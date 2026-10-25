@@ -119,13 +119,13 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 | `CancelTransferAsync(transferId, expectedGeneration, ct)` | 幂等取消指定执行代次；不匹配当前 `Generation` 则拒绝，旧取消不能停止恢复后的新代次 |
 | `ResumeTransferAsync(transferId, RemoteTransferResumeOptions, ct)` | 显式、重新审批后恢复；选项为非空 `OperationId`、正数 `ExpectedGeneration` 和非空 `TargetSessionId`，不能指定路径/偏移/源文件身份 |
 
-`RemoteUploadOptions` 只有必填非空 `OperationId`、`Overwrite`（默认否）及可空正数 `Timeout`（null 无执行死线）。无固定文件大小上限；64 位字节计数不受 32 MiB 或 `int.MaxValue` 限制，但不消除磁盘、权限、协议和网络边界。实现必须按流传输，不整体载入内存。宿主用不可预测的临时文件，校验和远端收尾成功后原子提交；无法实现所请求的原子提交/覆盖时明确失败，不能先删除目标。当前宿主的临时文件是目标同目录下的短名 `.vela-up-<16 位十六进制>`（接在目标名后面会让长文件名超出 `NAME_MAX`）。开始写之前做一次提交预检：要覆盖而服务端没有 `posix-rename`、不覆盖而目标已存在时直接失败，`ErrorCode` 分别为 `not-supported` 与 `commit-rejected`，与提交时被拒同一口径；预检查不出来不拦，之后才出现的目标照样由提交拒绝，提交仍是唯一权威。覆盖提交把被替换普通文件的权限位（07777）带到新文件上：属主尽力而为，setuid / setgid 只在属主属组对上之后才带；读不到目标模式，或改不了临时文件模式而它比目标宽时拒绝提交，目标原样不动（只许收窄，不许放宽）。
+`RemoteUploadOptions` 只有必填非空 `OperationId`、`Overwrite`（默认否）及可空正数 `Timeout`（null 无执行死线）。无固定文件大小上限；64 位字节计数不受 32 MiB 或 `int.MaxValue` 限制，但不消除磁盘、权限、协议和网络边界。实现必须按流传输，不整体载入内存。宿主用不可预测的临时文件，校验和远端收尾成功后原子提交；无法实现所请求的原子提交/覆盖时明确失败，不能先删除目标。当前宿主的临时文件是目标同目录下的短名 `.vela-up-<16 位十六进制>`（接在目标名后面会让长文件名超出 `NAME_MAX`）。开始写之前做一次提交预检：要覆盖而服务端没有 `posix-rename`、不覆盖而目标已存在时直接失败，`ErrorCode` 分别为 `not-supported` 与 `commit-rejected`，与提交时被拒同一口径；预检查不出来不拦，之后才出现的目标照样由提交拒绝，提交仍是唯一权威。覆盖上传的临时文件一建出来就按被替换普通文件的 0777 权限位新建（服务端照常减 umask；目标是个条目却读不出模式时按 0600；读不到目标就按服务端默认，提交时照旧把关），写入期间不比原文件宽；setuid / setgid / 粘滞位与属主仍由提交补上。覆盖提交把被替换普通文件的权限位（07777）带到新文件上：属主尽力而为，setuid / setgid 只在属主属组对上之后才带；读不到目标模式，或改不了临时文件模式而它比目标宽时拒绝提交，目标原样不动（只许收窄，不许放宽）。
 
-`RemoteTransferSnapshot` 包含任务/启动标识、会话与源/目标路径、`State`、从 1 开始的单调 `Sequence`、`TransferredBytes`/`TotalBytes`（未知 -1、空文件 0）、可空速率/ETA、创建/更新/完成时间、取消意图、远端停止确认、恢复检查点及错误类别/信息。`State` 默认 `Unknown = 0`；其余状态为 `Queued`、`Starting`、`Running`、`CancelRequested`、`Succeeded`、`Failed`、`Cancelled`、`TimedOut`。字节满格时可能还在 `Running`，不能据此宣称完成；`IsSuccess` 仅对应 `Succeeded`。`Unknown`/`TimedOut` 属于本地终态，不证明远端写入停止，不得自动重传。
+`RemoteTransferSnapshot` 包含任务/启动标识、会话与源/目标路径、`State`、从 1 开始的单调 `Sequence`、`TransferredBytes`/`TotalBytes`（未知 -1、空文件 0）、可空速率/ETA、创建/更新/完成时间、取消意图、远端停止确认、恢复检查点及错误类别/信息。`State` 默认 `Unknown = 0`；其余状态为 `Queued`、`Starting`、`Running`、`CancelRequested`、`Succeeded`、`Failed`、`Cancelled`、`TimedOut`。字节满格时可能还在 `Running`，不能据此宣称完成；`IsSuccess` 仅对应 `Succeeded`。`Unknown`/`TimedOut` 属于本地终态，不证明远端写入停止，不得自动重传。当前宿主在停止（取消、到期、断线、停用）之后最多等 30 秒让后端停下，再定终态；断线记 `Failed` / `session-disconnected`（确认停写、目标未写入，重连后重试安全），与 `Cancelled` 区分；Linux / macOS 源快照所在卷空间不够时为 `Failed` / `insufficient-space`。
 
 - 启动、查询、等待、取消和恢复的令牌都只控制**本次请求**；等待到期/请求取消不停止已启动的任务，显式取消意图一经登记不因请求取消而回滚。启动回执丢失时复用同一 `OperationId`，不能另造 id 重传。
 - 任务由宿主持有、归属宿主确认的插件身份，所有访问复核授权。插件侧 AI run/对话隔离仍须另行实施，不能把插件归属当成对话隔离。插件停用、授权撤销、SSH 断线和宿主退出须收尾；无停止确认则为 `Unknown`。只保证当前应用/插件生命周期，不承诺应用重启、插件重新激活或 MCP 会话销毁后仍可恢复。
-- 当前宿主逐组件解析本地源的父目录别名（如 macOS `/var`），末级文件链接仍拒绝（Windows 上只有名字代理类重解析点 —— 符号链接、目录联接、挂载点 —— 算链接，OneDrive 云文件占位符这类过滤器标记不算）；打开后用平台句柄路径核验实际对象，审批与快照显示解析后的路径。幂等回执保留原请求路径，别名后来改向或源路径消失时，同 OperationId 重取不会重新打开文件。路径检查与快照校验不等于对恶意并发写入的原子文件系统快照保证。
+- 当前宿主逐组件解析本地源的父目录别名（如 macOS `/var`），末级文件链接仍拒绝（Windows 上只有名字代理类重解析点 —— 符号链接、目录联接、挂载点 —— 算链接，OneDrive 云文件占位符这类过滤器标记不算）；打开后按文件身份（Windows 卷序列号 + 文件 id，Unix dev + inode）核验实际对象，核验那一端不经链接走到；映射盘、subst、硬链接名、大小写 / 规范化变体视为同一文件；审批与快照显示解析后的路径。幂等回执保留原请求路径，别名后来改向或源路径消失时，同 OperationId 重取不会重新打开文件。路径检查与快照校验不等于对恶意并发写入的原子文件系统快照保证。
 - 首次审批绑定规范化源/目标路径、实际源对象和覆盖策略；宿主检查本地读取与远端写入权限，排队开始前及整个传输期间保持源稳定，防止路径替换、符号链接与并发写入改变已批准内容，无法保证即失败。`Overwrite=false` 必须使用原子无替换提交，不能只在上传前检查存在性。
 - 启动/恢复的 `OperationId` 共用插件生命周期命名空间，记录请求种类和全部参数；操作串行化，先复核授权与去重记录再检查状态，重复请求返回当前快照但不执行。回执/墓碑保留整个生命周期，额度满拒绝新增，不遗忘 id 后重执行；参数冲突抛 `InvalidOperationException`，不存在或不属于本插件的 id 统一抛 `FileNotFoundException`。
 - 快照增加 `Generation`（从 1 开始，每次恢复加一）及 `DestinationCommitConfirmedAbsent`（默认 false）。`CanResume` 还要求确认最终目标未提交；提交回执丢失未消歧时绝不可恢复。重新验证源对象、临时文件归属和检查点；重连通过明确的 `TargetSessionId` 选择连接，宿主核对服务器密钥身份、账户和文件命名空间，仅地址相同不足以恢复。恢复保持 `transferId` 和递增 `Sequence`，清除取消意图与完成时刻，不满足条件拒绝而不从头重传。
@@ -133,7 +133,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 - RPC 新增 `fs/transfer/startUpload|get|wait|cancel|resume|progress`，载荷为 `FsTransferStartUploadRequest`、`FsTransferRef`、`FsTransferWaitRequest`、`FsTransferCancelRequest`、`FsTransferResumeRequest`、`FsTransferProgressNotification`。握手的 `SupportsTransferOperations` 默认 false，旧宿主不能被推断为支持。`progress` 携带快照，按 `TransferId + Sequence` 丢弃旧帧；至少 100ms 节流，状态变化及时发送，通知丢失用 get/wait 补读，通知不具备 exec 专用严格发送保证。
 - `FakeRemoteFs` 显式配置能力开关和 start/get/wait/cancel/resume 的 Handler，记录独立请求，转发参数及请求令牌；没有 Handler 就明确不支持，不退回现有整文件内存上传。幂等、权限及真正的任务执行由宿主实现，测试脚本须显式模拟，不由替身伪造成功。
 
-当前宿主在新上传 API 中通过独立单任务租约实施可信确认：读取内容前展示插件、真实会话、本地源、远端路径和覆盖策略，只批准当前任务，不继承终端/开会话许可；AI `Bypass` 不影响宿主确认。缺少授权闸、提示器或桌面窗口时拒绝。插件管理页撤销同步使待批准及活动租约失效并请求取消，提交前重验，查询/后续进度不再泄漏被撤销的元数据；不承诺回滚已经提交的文件。这不扩展到旧同步文件 API，也不代表通用权限 Broker 已完成。
+当前宿主在新上传 API 中通过独立单任务租约实施可信确认：读取内容前展示插件、真实会话、本地源、**文件大小**、远端路径和覆盖策略，只批准当前任务，不继承终端/开会话许可；AI `Bypass` 不影响宿主确认。缺少授权闸、提示器或桌面窗口时拒绝。插件管理页撤销同步使待批准及活动租约失效并请求取消，提交前重验，查询/后续进度不再泄漏被撤销的元数据；不承诺回滚已经提交的文件。这不扩展到旧同步文件 API，也不代表通用权限 Broker 已完成。
 
 此契约不改变现有同步上传/下载、AI 对话附件或 IM 平台发文件上限。宿主与 AI 的接线使用独立任务提供可见进度、模型任务查询及脱离长请求的上传；外部 MCP Agent 仍须主动查询，不能假定有服务端模型唤醒。当前宿主连接边界不能证明重连后的服务器密钥、账户与远端命名空间一致，因此 `ResumeTransferAsync` 明确报不支持、`CanResume=false`；接口存在不代表恢复已实现，`Unknown` 不自动重传。
 
@@ -144,7 +144,7 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 - `IRemoteFsApi.SupportsDownloadOperations` 和 `HandshakeResponse.SupportsDownloadOperations` 独立于上传能力，默认 `false`；不支持即明确拒绝，不降级旧同步 `DownloadFileAsync`。
 - `StartDownloadAsync(sessionId, remotePath, localPath, RemoteDownloadOptions, ct)` 返回后台任务快照。`RemoteDownloadOptions` 含必填 `OperationId`、`Overwrite=false`、`Timeout=null`（无默认执行死线）；请求令牌只取消本次回执等待，不取消已登记下载。内容按流处理，没有 AI 固定大小上限，继续服从磁盘、权限、用户下载带宽与共享资源预算。
 - 复用 `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` 的所有权、序号和执行代次语义；下载 `CanResume=false`，无断点续传或跨重启恢复。`LocalPath` 始终为最终本地目标，`RemotePath` 为远端源，不暴露临时路径。幂等签名包含方向和全部参数，同 id 换方向/异参拒绝；丢失回执复用原 id，不自动重下未知结果。
-- 快照附加 `Direction`：`RemoteTransferDirection.Upload=0`、`Download=1`；`Phase`：`RemoteTransferPhase.Unknown=0`、`Approval`、`Transfer`、`Verification`、`Commit`。缺失字段兼容默认 Upload/Unknown，既有构造/解构不变。64 位字节计数、速率、ETA 与 `RemoteStopConfirmed` 描述进度；满字节不等于成功，刷新、关闭、校验和提交确认后才是 `Succeeded`。取消不合作的后端可能先报告本地 `Unknown`/`TimedOut` 且 `StopConfirmed=false`，实际退出前保留槽和句柄。
+- 快照附加 `Direction`：`RemoteTransferDirection.Upload=0`、`Download=1`；`Phase`：`RemoteTransferPhase.Unknown=0`、`Approval`、`Transfer`、`Verification`、`Commit`。缺失字段兼容默认 Upload/Unknown，既有构造/解构不变。当前宿主的**上传**快照同样报 `Phase`（2026-10-25 起；此前上传一律 `Unknown`）：回执与等宿主确认时 `Approval`，批准后 `Transfer`，回读 / 摘要校验 `Verification`，提交 `Commit` —— 插件据此只撤「还没批准」的任务；SDK 契约不变，只是宿主开始填这个字段。64 位字节计数、速率、ETA 与 `RemoteStopConfirmed` 描述进度；满字节不等于成功，刷新、关闭、校验和提交确认后才是 `Succeeded`。取消不合作的后端可能先报告本地 `Unknown`/`TimedOut` 且 `StopConfirmed=false`，实际退出前保留槽和句柄。
 - RPC 增加 `PluginRpc.FsTransferStartDownload="fs/transfer/startDownload"` 和 `FsTransferStartDownloadRequest`；继续以 get/wait 为权威观察，不新增一套下载推送承诺。`FakeRemoteFs` 分别配置下载能力/处理器并记录启动请求，缺处理器明确不支持。
 - 上传下载共用每插件 1024 生命周期回执、32 活动/排队任务、4 实际传输槽，不因增加下载把总体并发翻倍。旧同步 API、模型上下文读取、聊天附件和 IM 平台附件限制不变。
 
@@ -153,6 +153,25 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 **当前安全提交支持 Windows 固定本地 NTFS 与 Linux / macOS（x64、arm64）的本地文件系统。** 两边都在审批之前钉住目标目录链，建临时文件、提交与清理都相对钉住的父目录进行。Windows 逐段持有带遍历 + 读属性权限的祖先目录句柄，共享读写、不共享删除（只读属性的句柄不参与共享检查，带上遍历权限才算数），祖先改不了名、挪不走；只拒名字代理类重解析点（符号链接、目录联接、挂载点），云文件占位符等过滤器标记不算链接；在钉住的父目录里独占 `CreateNew` 随机临时文件并按句柄核验其位置，提交经 `NtSetInformationFile` 相对父目录句柄、只给末级名字。Linux / macOS 先把父目录解析成真实路径并写进快照的 `LocalPath`，再从 `/` 起逐级 `openat(O_DIRECTORY | O_NOFOLLOW)`、只留父目录 fd，链上任何一级是符号链接即拒绝；只收本地、按 inode 寻址的文件系统（Linux 按 `statfs.f_type` 白名单，macOS 看 `MNT_LOCAL`），9p / SMB / FUSE / NFS 在审批前拒绝；临时文件 `O_CREAT | O_EXCL | O_NOFOLLOW` 独占新建并持有 flock，无替换提交用 `renameat2(RENAME_NOREPLACE)` / `renameatx_np(RENAME_EXCL)`，标志不被支持时退到 `linkat` + `unlinkat`，覆盖用 `renameat`；新建文件权限按 umask 收窄，覆盖时沿用旧文件的权限位（不带 setuid / setgid / sticky）。默认原子无替换，目标中途出现也不覆盖；只有明确批准覆盖才替换，不先删最终目标。打开目标时清扫同目录崩溃遗留的 `.vela-download-<48 位十六进制>`，只删名字逐字对得上且没有任务在用的，同形链接只删链接本身。UNC、非 NTFS/非固定盘、其它文件系统及不支持后端明确拒绝，`ErrorCode` 为 `not-supported`，不退回直接写最终路径。用户最终路径不交给旧同步下载；时间戳偏好应用于任务持有的临时句柄。
 
 检查实际长度、传输前后远端元数据，并使用可用的摘要能力；不强制纯 SFTP 账号提供 exec，也不默认第二遍整文件下载。检测源变化则失败，但这些检查**不是远端原子快照保证**。提交用例在 Windows 与 Linux（WSL Debian 的 ext4 与 tmpfs）上实际跑过，macOS 只经 CI；这不是真实 SSH/GUI 整链验证。AI 生命周期与终态通知见 [自动化与 AI §1.7](../plugins/11-automation-and-ai.md#17-ai-双入口后台下载sdk-212)。
+
+### 3.3d 插件协议的文件能力补口（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，不代表宿主已经接上。** 契约已写进 velashell-plugin-sdk 的 dev，版本号由发布者决定；不修改版本横幅、不制作下游使用的本地包。正式包发布后，宿主中央依赖抬上去，再接 `PluginProtocolFileService`（链接字段、改修改时间、摘要）与 `RemoteFsCapability.Map`。全部只增不改，`apiLevel` 不变。
+
+- `RemoteFileEntry` 新增两个 `init` 属性（八参构造与 `Deconstruct` 不变）：`IsSymbolicLink` 按 lstat 判断；`IsDirectory`、`Size`、`LastModified` 描述链接**目标**，断链保留链接自身的属性；`LinkTarget` 是 readlink 的原文，可以是相对路径。隔离进程的 `fs/list`、`fs/stat` 现有 JSON 自动带上这两个字段，旧数据缺字段时读成「不是链接」。
+- `IProtocolLastWriteTime`（可选，与 `IProtocolStreamUpload` 一样由协议实现类兼实现）：`SetLastWriteTimeAsync(sessionId, path, DateTimeOffset lastWriteTime, ct)`。
+- `IProtocolChecksum`（可选，兼实现）：`ComputeChecksumsAsync(sessionId, RemoteChecksumAlgorithm algorithm, IReadOnlyList<string> paths, ct)` 返回 `IReadOnlyDictionary<string, string?>` —— 键就是请求里的路径，值是小写十六进制，单个文件算不出时为 null。**只能用服务器自己给出的摘要**，不许为了凑一个值把整个文件读回来算。`RemoteChecksumAlgorithm` 为 `Unknown = 0`、`Sha256`、`Sha512`、`Sha1`、`Md5`。
+- 「不支持」怎么报：协议不实现这两个接口，宿主就如实报不支持；实现了但这条会话做不到（服务器没有 MFMT 或 HASH）时抛 `ProtocolUnsupportedException`。这两个接口只给 `inProcess` 的协议用（协议本来就只支持 `inProcess`），没有新增 RPC。
+- 范围外：插件协议上**创建**符号链接仍然没有契约，宿主的 `CreateSymbolicLinkAsync` 照旧报不支持。
+
+### 3.3e 传输启动前被拒（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，宿主尚未改抛它。** 版本号由发布者决定，不修改版本横幅。
+
+- `PluginTransferRejectedException`（派生自 `InvalidOperationException`，刻意不是 `IOException`；sealed）带 `Reason`（`RemoteTransferRejectReason`：`Unknown = 0`、`SourceNotFound`、`SourceInUse`、`QuotaExceeded`、`InsufficientSpace`）。RPC 错误码 `RpcErrorCodes.TransferRejected = "transfer-rejected"`，线上格式 `transfer-rejected:source-in-use`，不认识或缺失的后缀还原成 `Unknown`；`FromException` 里排在 `InvalidOperationException` 之前。
+- 宿主抛它就等于保证：任务没有登记、没有生成 transferId、没有读写任何内容、OperationId 也没有记进账本。条件变了之后可以再试（同一个 OperationId 不会撞上「参数不符」），但不要紧接着自动重试。
+- 与另外两种结局分开处理：「结果未知」只能用同一个 OperationId 去重取回执；「用户拒绝」（`PluginPermissionDeniedException`）重试没有意义。参数非法、平台不支持、会话不在、OperationId 参数冲突照旧用原来的异常类型。`IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` 补了 `<exception>` 说明。
+- 当前宿主（发版前）对这几种登记前的拒绝仍抛原来的类型（例如快照空间不够是 `Failed` / `insufficient-space` 的快照，§3.3b）。
 
 ### 3.4 界面与扩展点
 
@@ -250,6 +269,43 @@ Icon = PluginIcon.Filled(RedisLogoPathData, viewBoxSize: 1030)
 > ⚠️ 与 `PanelTitleAction.IconPathData` **不是一回事**。那个画的是**窗口标题栏**上的动作按钮,
 > 恒为 24×24 描边,没有填充与视框可言(见[开发指南 §5.9](../templates/dev-guide.md))。
 
+### 3.7 往消息中心发通知（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约，宿主尚未实现。** 契约已写进 velashell-plugin-sdk 的 dev，版本号由发布者决定，不修改版本横幅。正式包发布后，宿主再实现进程内 `PluginUiApi` 与隔离模式的 `ui/notify` 路由、限频、按插件静音、消息来源与卸载清理；在那之前 `SupportsNotifications` 为 false。
+
+```csharp
+if (ctx.Ui.SupportsNotifications)
+{
+    PluginNotificationOutcome outcome = await ctx.Ui.PostNotificationAsync(new PluginNotification
+    {
+        Id = "backup-failed:web-01",          // 本插件内稳定的去重键
+        Title = "备份失败",
+        Body = "web-01 的夜间备份没有完成。",
+        Level = PluginNotificationLevel.Warning,
+        ActionCommandId = "acme.backup.open", // 只能是本插件的命令
+        ActionLabel = "查看",
+    });
+}
+```
+
+- `PluginNotification`（record）：`Id` 必填，本插件内稳定的去重键，1–128 字符、不能有控制字符；`Title` 必填、纯文本，宿主超过 200 字截断；`Body` 纯文本，超过 1000 字截断；`Level`（`Info` / `Warning` / `Critical`，与宿主的轻重一一对应）；
+  `ActionCommandId` 只能是本插件的命令（以 `"<pluginId>."` 开头），`ActionLabel` 有命令才能给；`Validate(pluginId)` 是宿主、PluginHost 与测试替身共用的同一套校验。**故意没有网址字段，也没有「发送方」字段**。
+- `IUiApi.SupportsNotifications`（默认 false）与 `PostNotificationAsync(notification, ct)`（默认实现抛 `NotSupportedException`）都有默认实现，现有实现照旧能编译。返回 `PluginNotificationOutcome`：`Unknown = 0`、`Posted`、`AlreadyPosted`、`Muted`、`RateLimited`。
+- 约定：消息中心只收**要留存、可回看**的消息，进度、运行时状态、操作回执、调试信息不该往这里发（[消息中心与资讯源](../host/消息中心与资讯源.md) §1）。先去重、后限频：同一个 id 重投返回 `AlreadyPosted`，不算频率；每个插件每分钟最多 6 条新消息（宿主可以收得更紧），超出返回 `RateLimited`、不抛异常；用户按插件静音时返回 `Muted`。消息跨重启保留，受消息中心总量上限约束；插件卸载时宿主删掉它发的消息；插件不能改写或撤回已发的消息。动作命令最好写进清单的 `contributes.commands`，插件没激活时点击也能惰性激活。
+- 权限：不新增权限项 —— 普通权限 `ui.contributions` 本来就包含「通知（有频控）」（[06 §1](../plugins/06-permission-system.md)）；`notifications.system` 管的是操作系统通知，与这个无关。用户的控制手段在宿主侧：插件管理页的按插件静音。
+- 隔离进程：RPC `ui/notify`（`UiNotifyRequest` / `UiNotifyResponse`），握手 `HandshakeResponse.SupportsNotifications` 缺席时为 false（[IPC §7.4](../plugins/05-ipc-protocol.md)）。
+- 测试替身 `FakeUi`：`SupportsNotifications`（默认 true）、`NotificationRequests`（全部投递）、`PostedNotifications`（实际入列的）、`NotificationOutcome` 脚本（模拟限流与静音）、`PluginId`；校验与去重规则与宿主一致，`TestPluginContext` 把自己的 PluginId 同步给它。
+
+### 3.8 版本比较 `SemanticVersion`（SDK TBD，发版时替换）
+
+**此处是尚未发布的 SDK 契约。** 宿主、CLI 与商店各自的版本比较会在包发布后改用它；在那之前各处照旧。
+
+- `VelaShell.PluginSdk.Versioning.SemanticVersion`（readonly struct）：`Major` / `Minor` / `Patch` / `Revision`（第四段，没有时为 0）、`PreRelease` / `BuildMetadata`（永不为 null）、`IsPreRelease`；`TryParse` / `Parse`（不合法抛 `FormatException`）。
+- `CompareTo` 按完整的 SemVer 2.0 §11 优先级：`beta.2 < beta.10`，纯数字标识符按长度再按序数比、任意长度不溢出，纯数字低于含字母的，含字母的按 ASCII 序数、区分大小写，前面都相同时标识符多的更高；构建元数据保留但不参与比较（`Equals` / `GetHashCode` 同一口径）。
+  `CompareCoreTo` 只比数字段，给 `minSdkVersion` / 最低宿主版本这类装载闸用；`TextComparer` 比较版本字符串，解析不出的当最旧、同优先级按原文序数。
+- 解析时数字段沿用宿主与 `plugin.json` 的宽松写法（允许前缀 `v`、两段或四段、数字段前导零），后缀严格按 SemVer：标识符不能为空、只含 `[0-9A-Za-z-]`，预发布里的纯数字标识符不能有前导零。
+  所以清单正则放行而它判为不合法的写法有 `1.0.0-beta.01`、`1.0.0-a..b`（要不要收紧清单校验另定）。
+
 ---
 
 ## 4. 清单(`plugin.json`)
@@ -330,7 +386,7 @@ public async Task Activate_RegistersCommand()
 
 可用替身:`CollectingLogger`、`InMemoryStorage`、`InMemoryTimeSeries`、`FakeSessions`、
 `FakeRemoteFs`、`FakeRemoteExec`、`FakeRemoteTunnel`、`FakeTerminal`、`FakeTerminalViewApi`、
-`FakeUi`、`FakeSecrets`、`FakeClipboard`、`RecordingCommands`、`RecordingProtocols`、
+`FakeUi`（SDK TBD 起另有通知成员，见 §3.7）、`FakeSecrets`、`FakeClipboard`、`RecordingCommands`、`RecordingProtocols`、
 `RecordingWorkspaces`、`TestHostEvents`、`TestHostInfo`。
 
 `FakeSessions` 除了 `AddConnected` 还有 `AddSaved`(造一条已保存配置)与三个钩子:
