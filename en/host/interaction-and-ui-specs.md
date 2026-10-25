@@ -857,7 +857,7 @@ for work the host cannot see.
    - `New SSH Connection` … `Ctrl+N`
    - `Open SFTP File Manager` … `Ctrl+Shift+F`
    - `Open Settings` … `Ctrl+,`
-   - (Extensions) `Open Tunnel Manager`, `Split Pane`, `Switch Theme`, `Record Session`, `Connection Diagnostics`, `SSH connection info` (since 2026-10-24, available when the active tab is a connected SSH session, §11B), `Operations Orchestration`…
+   - (Extensions) `Open Tunnel Manager`, `Split Pane`, `Switch Theme`, `Record Session`, `Connection Diagnostics`, `SSH connection info` (since 2026-10-24, available when the active tab is a connected SSH session, §11B), `Session Health Check (All Connections)` (since 2026-10-25, `tools.healthCheck`, `activity` icon, every stored connection sorted by name, §11C), `Operations Orchestration`…
    - `Send Break` (session category, since 2026-10-05): available when the active tab is a connected SSH session (local and plugin terminals cannot use it); it sends a BREAK (RFC 4335),
      which is how serial console servers and network device consoles get into ROMMON / the boot menu. Whether the server performed it is reported in a toast: an ordinary toast when it did,
      a yellow one, “The server did not perform the Break (it may not support it, or the session has no terminal)”, when it did not.
@@ -1047,6 +1047,36 @@ for work the host cannot see.
   - **Route (proxy and jump hosts)**: numbered from near to far; an outbound proxy as one line (e.g. `socks5 host:port`); each jump host as one line with its address and one with “version · key exchange · host key · cipher · authentication”, marked “down” when that hop has dropped. The block is hidden for direct connections.
 - **Rules**: everything comes from read-only properties the SSH library already exposes; **opening and refreshing never send anything on the wire** (the round trip is the one the status bar's latency measurement and keep-alive already took). The jump hosts passed on a successful connection are recorded hop by hop by the host while it assembles the jump connections (the library's dialer only records per-hop results on failure), starting afresh on every connection. Refresh is manual, with no automatic polling (so the content does not jump while you select text to copy); the data is fetched from the tab's current session, so after a reconnect a refresh follows the new connection.
 
+## 11C. Session Health Check Window (since 2026-10-25)
+
+Runs the four steps of connection diagnostics on a batch of saved connections, one by one, and produces a table of "which ones cannot be reached".
+
+**Triggers**: "Health-Check This Group" on an explorer group's context menu, "Health-Check N Connections" on the multi-select menu (§12), and the command palette's "Session Health Check (All Connections)" (`tools.healthCheck`, every stored connection sorted by name).
+**It runs only when you start it, never on a schedule**; one batch at a time — starting another while the previous one is still running only brings the window to the front with "The previous health check is still running; stop it or wait for it to finish first.", without interrupting it.
+
+**Window**: at most one modeless window at any time (`SessionHealthCheckWindow`), with the same frame as §11B (28px title bar, resize grip in the bottom-right corner, double-click to maximize); size and position are stored under `healthCheck` in the document store's `windowLayout`. Closing the window stops the run.
+- **Title bar actions** (left to right): show problems only (`circle-alert`, accent when on), verify login (`key-round`, accent when on; the tooltip has two lines: the state + "On: log in once with the saved credentials and disconnect right away. Off: check only up to the SSH handshake, without logging in to the server. Takes effect on the next run."),
+  stop (`square`, disabled when nothing is running), run again (`refresh-cw`, disabled while running), copy as text (`copy`, tab-separated, all rows, briefly turns into a check mark after copying).
+- **Subtitle**: the summary "N connections · OK a · need attention b · unreachable c", prefixed with "Checked x / N · " while running.
+- **Table**: 26px header, 28px rows; columns: result (colored by status: OK / Reachable green, Needs credentials / Needs you yellow, Unreachable / Timed out red, Waiting / Not checked / Stopped gray, Checking… accent), name, target (monospace), failed at, details, time,
+  row actions (connection diagnostics `stethoscope`, SSH / SFTP only, opening §15's diagnostics owned by the health check window; edit connection `pencil` — after saving, the latest copy is taken from the store and that one host is checked again).
+  With "show problems only" on and nothing wrong, "No connection needs attention" is centered. One line of gray text at the bottom explains the rules (concurrency and time limit formatted from the actual values).
+
+**What each host gets**:
+- Only SSH / SFTP profiles are checked; FTP and plugin protocols are listed as "Not checked" (a plugin probe opens a real session and may show the plugin's own dialogs). Up to 6 hosts at once (the same as opening a whole group), at most 30 seconds each — then "Timed out", without holding up the batch;
+  on "Stop", whatever is unfinished or queued becomes "Stopped". Both numbers are constants, not settings.
+- The four steps of connection diagnostics are reused (DNS → TCP → SSH identification → authentication; with a jump chain the first three target the first hop and authentication goes through the whole chain). Results: all four pass → "OK"; with "verify login" off → "Reachable"; no saved credentials → "Needs credentials"; needs a human answer → "Needs you";
+  any other failure → "Unreachable" — the first failed step is "failed at" ("Jump host settings" when the chain is misconfigured), and the details are the issue title plus that step's reason.
+- **The authentication step runs, but never shows a dialog** (the connection is assembled as "unattended", every hop of a jump chain marked):
+  - Without saved credentials the step is skipped as in diagnostics and recorded as "Needs credentials" (a manual connection would show the login dialog; the health check does not).
+  - A host fingerprint that needs a human decision (first seen with first-connection confirmation on, or changed without "block on change") is rejected the way automatic reconnects do → "Needs you", with "The health check did not accept host key {fingerprint} of {host}: it needs your confirmation, and the health check never asks. Connect to it manually once to check the fingerprint.";
+    a first-seen key raises no security alert (the user picked this machine to check; they just have not connected to it themselves yet), a changed one still does. With first-connection confirmation off, the key is recorded on first use as usual, the same as a manual connection.
+  - keyboard-interactive: recognizable password prompts are still answered with the saved password; a one-time code or password change is declined → "Needs you" (§13.2 one-time code dialog). A Tailscale check-mode re-check is rejected the same way → "Needs you".
+  - When an external agent asks for its own per-use confirmation (`ssh-add -c`, the 1Password / KeePassXC approval prompt), that is the agent's UI, which the health check cannot suppress.
+  - Cancellations such as Stop or a host's time limit propagate as cancellations and are not counted as "Unreachable".
+- **Verify login** switch (on by default): when off, only the SSH handshake is checked and nothing logs in to the server (some environments alert on every login); takes effect on the next run; remembered only for this launch — **it is not a setting** and is not written to the settings file.
+- Health check logins are not written to the audit log or connection history (the same as the profile dialog's "Test"), and "Recent connections" does not change.
+
 ---
 
 ## 12. Session Context Menu (`e6klM`)
@@ -1078,6 +1108,7 @@ Right-click a session row in the sidebar to open it (200px, `bg-surface`, corner
   with its overlay kept), so one that reconnects later is still in the channel; at the end one toast says "N terminals joined
   synced input channel X", with a clause each for any that did not connect and any non-terminals skipped, and then at warning
   level
+- Health-Check N Connections (`activity`, since 2026-10-25) — runs the four diagnostic steps on the selected connections one by one and opens the session health check window (§11C); no terminals, no dialogs
 - Open in dual-pane SFTP (`arrow-right-left`, §6.2) — only with exactly two; if one of them cannot go into the dual pane the item
   is disabled, with a line below explaining why
 - Divider
@@ -1096,6 +1127,7 @@ Right-clicking a row outside the selection opens the menu above as usual and end
   happens on an empty group
 - Open All with Synced Input (`link-2`) — same rules as "Open N Connections with Synced Input" in the multi-select menu,
   applied to the whole group
+- Health-Check This Group (`activity`, since 2026-10-25) — same as "Health-Check N Connections" in the multi-select menu, applied to the whole group
 - Divider
 - Move up / Move down (`arrow-up` / `arrow-down`) — disabled at the top / bottom
 - Divider
@@ -1545,6 +1577,9 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
     password-change flow, or the previous one was wrong) the user answers. Everything else opens the dialog. An
     information-only round (the server sends instructions but no prompts) does not open it; its text is carried into
     the next dialog.
+  - **Not shown during a session health check** (§11C): password prompts are still answered with the saved password; a one-time code or password change is declined without a dialog and reported as
+    "The server asks for interactive verification (a one-time code or similar); the health check does not answer it. Connect to it manually once." / "The server requires a password change; the health check does not do that. Connect to it manually once."
+    — a responder that declines everything is attached instead of none at all: without one, the library's built-in "password also answers" would type the password into the code round and burn a one-time-code failure.
   - **Private key / certificate / SSH Agent never fall back to the password**: a plain password prompt is answered with
     an empty string so the server rejects it, and only code-style prompts open the dialog — that is the second step of
     `AuthenticationMethods publickey,keyboard-interactive` (key + code); a password box popping up after the key was
@@ -1599,6 +1634,7 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
   Whatever would have asked is rejected instead; the disconnect notice says that automatic reconnect stopped and to reconnect by hand to check the fingerprint, and a security alert is still recorded
   (audit log: “rejected a host fingerprint”); every hop of a jump chain behaves the same. The two settings that never ask are unchanged: when the user turns “confirm on first connection” off an unseen host is still
   recorded on first use (TOFU), and with “block on change” on a change is still blocked. The login dialog for missing credentials and the one-time-code dialog are not affected and still appear.
+  **The session health check** (§11C) does not show this dialog either and rejects outright, saying "The health check did not accept host key {fingerprint} of {host} … Connect to it manually once …"; a first-seen key raises no security alert, a changed one still does.
   **Each key type of a host is recorded separately** (servers often have RSA, ECDSA and Ed25519 keys at once): a key matching any recorded one is accepted; accepting a key of a new type **adds a record** instead of overwriting the existing one,
   so whichever type is negotiated later is recognised; only a different key of the same type replaces it. The change dialog shows the recorded fingerprint of the same type, or the most recently seen one when that type was never recorded.
   When connecting, the recorded types go to the front of the host key algorithm list, so a normal server negotiates the type already recorded.
@@ -1950,6 +1986,7 @@ Open these as tabs or standalone floating windows. All can also be entered from 
     on a jump chain, a line above names the hop `user@host:port` whenever it changes. Without an SSH connection in this run: “This run did not get as far as an SSH connection (an earlier step failed, or there are no saved credentials), so there is no protocol trace.”; past the limit: “N more packet(s) went past the recording limit and were not recorded.”
   - The exported report ends with the same text (headed “Protocol trace (packet metadata only, no contents; lengths of authentication packets we send are not recorded)”). **The tap is attached only for diagnostics**; the profile page's "Test" and ordinary connections do not get it.
   - When the authentication step fails on algorithm negotiation and the peer offers algorithms this version implements but has not enabled, the issue card has “Allow these algorithms and diagnose again” below its description (since 2026-10-25; rules in “Allow the algorithms with one click after a negotiation failure” in §7).
+  - To check a batch of connections at once, use the **session health check** (§11C): it reuses the same four steps, but shows no dialogs and attaches no protocol trace.
 
 ---
 

@@ -130,6 +130,8 @@ The following settings were reviewed against their runtime consumers, are effect
 | Shortcuts | This belongs in settings | Retain in the Settings Center | Renamed back to "Shortcuts": the global and tab bindings are customizable (A-08), and the page is generated from the factory table plus the current changes (C-10) |
 | About | An information page, not a setting | It can remain the final entry or be placed at the bottom of settings | Version, license, diagnostic information, and update entry ("Check for updates" now honestly says it is not connected) |
 
+> The "Verify login" and "Show problems only" switches in the title bar of the session health check window (since 2026-10-25, see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §11C) are window switches remembered only for this launch — **not settings**, not written to the settings file; the concurrency of 6 and the 30-second limit per host are constants. Do not mistake them for settings left unwired during an audit.
+
 ## 9. Recommended Information Architecture
 
 > Status: Not yet implemented as a whole (Phase 4). Local changes implemented in this batch: the General page was rearranged into "Startup and Window / Language / Connection Defaults / Data and Storage / Behavior", automatic reconnect settings were grouped, and the Terminal page gained a "Bell and Tab Alerts" group.

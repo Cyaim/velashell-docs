@@ -193,7 +193,7 @@ The "Resolution point" column says where this design turns the reference into a 
 | `ConnectionDiagnosticsService.HasStoredCredentials` | `:351-360` | Step 4 `:223-231` | A reference counts as having credentials |
 | `ExternalLaunchCoordinator` | `:238` | — | No change needed: when the request carries no password the saved profile is reused, and it is enough for the saved profile to carry a reference |
 
-**Paths with no decision and no prompt**: `ReconnectTabAsync`, opening and reconnecting plugin terminals, `ProbePluginConnectionAsync`, the jump connection of `EstablishWorkspaceTunnelAsync`, and each jump hop in `BuildChainAsync`.
+**Paths with no decision and no prompt**: `ReconnectTabAsync`, opening and reconnecting plugin terminals, `ProbePluginConnectionAsync`, the jump connection of `EstablishWorkspaceTunnelAsync`, and each jump hop in `BuildChainAsync`. The session health check (since 2026-10-25, `TestConnectionUnattendedAsync`, connections assembled with `ConnectionInfo.IsUnattended`) does not prompt either: without stored credentials it skips as diagnostics does and records "Needs credentials"; anything needing a human answer (fingerprint, one-time code, password change, Tailscale re-check) is rejected and recorded as "Needs you".
 
 ### 2.4 Retry loops and the login dialog
 
