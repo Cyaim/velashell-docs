@@ -666,7 +666,8 @@ every root-level property belongs to exactly one category):
   unticked too — a file from someone else should not quietly switch off external-launch confirmation or redirect outbound traffic.
 - **Secrets are never written**: the proxy password and the alert webhook URL are left out whether or not their category is ticked. There is
   no encrypted export: those two are the only real secrets in the settings, and moving secrets to another machine is what cloud sync's
-  end-to-end passphrase is for.
+  end-to-end passphrase is for. Since 2026-10-25 cloud sync without an end-to-end passphrase leaves these two out as well, and a pull keeps the
+  local values by the same rules as an import; an encrypted payload with a passphrase still carries them.
 - **Runtime state is not exported**: window size and position and the last open sessions (`lastOpenProfileIds`) are not written, and import
   keeps the local ones; one-time migration markers do travel (without them an import would migrate values the user already chose a second time).
 - **File shape**: still the `AppSettings` JSON, keeping only the selected blocks, plus an export header `velaShellExport` (format
@@ -769,3 +770,24 @@ two OpenSSH interop items in the "Trusted hosts" section, followed by a new "Tru
   the command-line ssh, import once.
 - Trusting a host now also records its public key (only the fingerprint was stored before); older records get it the next time they are
   trusted on connect, and only then can the export write a host key line for them.
+
+### 2026-10-25 Twenty-first batch (first-connection fingerprint confirmation on by default)
+
+The **default of `Security.ConfirmFirstFingerprint` changes from off to on** (host side: the `plan.md` section of the same day). Interaction:
+[interaction-and-ui-specs.md](interaction-and-ui-specs.md), the host fingerprint confirmation item in §13.2.
+
+- **Why**: the user manual has always said that the first connection asks you to check the fingerprint. The trouble with TOFU is that the
+  first time is exactly when checking matters most — with someone on the path, the key recorded is the impostor's, and every later
+  connection "verifies" against it. On by default matches OpenSSH's `StrictHostKeyChecking=ask`.
+- **One-time migration**: a stored `false` cannot tell the old default from a user's choice, so it follows the same pattern as the
+  fingerprint-change block (fifth batch) — switch it on once, stamp `Security.FirstFingerprintDefaultMigrated`, and respect the user from
+  then on. The flag is registered as a migration field (`SettingsCategories.MigrationFields`), so the audit does not count it as a settings
+  change while export and sync still carry it (seventeenth batch).
+- **Behavior**: connections from anywhere in the UI, test connection and connection diagnostics, standalone SFTP, tunnels started by hand
+  or by "Establish when the app starts", plugin `open_session`, "Resume" in the transfer queue and external launches (after their
+  confirmation) all show the "Host Trust" dialog for an unseen host, and reject when there is no main window to show it on. Automatic
+  reconnects (the terminal countdown, the batch after waking from sleep, a tunnel's automatic redial) reject an unseen host without a
+  dialog and record a `hostkey-rejected` alert — with the old default off they quietly recorded it on first use. Hosts trusted "once"
+  are still let through for the rest of the run; hosts covered by a trusted host CA are unaffected (twentieth batch).
+- The switch keeps its place and wording; its description "When off, the fingerprint is recorded automatically on first connect (TOFU)"
+  still holds.

@@ -167,7 +167,7 @@ The "Resolution point" column says where this design turns the reference into a 
 | Tunnel panel background connection | `ConnectTunnelHostAsync` `:1767-1791`; tunnel automatic reconnect `TunnelPanelViewModel.AutoReconnectAsync` `:591-600` | The tunnel panel's server list | `BuildChainAsync`; automatic reconnect uses non-interactive mode |
 | SSH jump tunnel of workspace plugins | `EstablishWorkspaceTunnelAsync` `:4276-4339` (the jump profile is read from the repository `:4304`; an already connected session may be reused `:4310`) | Repository instance | `BuildChainAsync` |
 | Recent connections / command palette / session tree / startup restore / "Connect" in the profile dialog | `TryConnectRecentAsync` `:4531`, palette `:2192`, `SessionTreeViewModel` → `MainWindow.axaml.cs:446`, restore `MainWindow.axaml.cs:526-578`, dialog `MainWindow.axaml.cs:1187` | Each one's own cache / repository instance | Routed by protocol |
-| External launch (URL / command line / `.xsh`) | `ExternalLaunchCoordinator.cs:66` → `ResolveProfileAsync` `:223-268` (when the request carries no password, the saved profile is reused `:225`) | Saved or temporary profile | Routed by protocol |
+| External launch (URL / command line / `.xsh`) | `ExternalLaunchCoordinator.cs:67` → `ResolveProfileAsync` `:236-285` (when the request carries no password, the saved profile is reused `:238`) | Saved or temporary profile | Routed by protocol |
 | Plugin `Sessions.OpenAsync` (the AI plugin's `open_session`) | `SessionsCapability.OpenAsync` `:91-145` → `HostSessionOpener.cs:48` → `TryConnectProfileAsync` | Repository instance; the plugin only gets a `SessionInfo`, **with no credentials** | `BuildChainAsync` |
 | Test connection | `ConnectionProfileViewModel.cs:1202` → `TestConnectionAsync` `ConnectionWorkflowService.cs:57-88` | A new object from `BuildProfile()` | `BuildChainAsync`; plugin protocols go through `ProbePluginConnectionAsync` `:4201-4245` |
 | Connection diagnostics step 4 | `ConnectionDiagnosticsService.cs:236` → `TestConnectionAsync`; `HasStoredCredentials` `:351-360` decides whether to skip | Tree cache or `tab.Profile` | `BuildChainAsync` |
@@ -189,7 +189,7 @@ The "Resolution point" column says where this design turns the reference into a 
 | `RequiresFtpCredentials` | `:4492-4494` | `:3661` | Same as above |
 | `ConnectionWorkflowService.ValidateProfile` | `ConnectionWorkflowService.cs:258-307`; **throws** when the password is empty (`:286-289`) | `ConnectProfileAsync` `:94` (credentials required), `SaveProfileAsync` `:40` (not required) | Skip the non-empty password check when there is a reference |
 | `ConnectionDiagnosticsService.HasStoredCredentials` | `:351-360` | Step 4 `:223-231` | A reference counts as having credentials |
-| `ExternalLaunchCoordinator` | `:225` | — | No change needed: when the request carries no password the saved profile is reused, and it is enough for the saved profile to carry a reference |
+| `ExternalLaunchCoordinator` | `:238` | — | No change needed: when the request carries no password the saved profile is reused, and it is enough for the saved profile to carry a reference |
 
 **Paths with no decision and no prompt**: `ReconnectTabAsync`, opening and reconnecting plugin terminals, `ProbePluginConnectionAsync`, the jump connection of `EstablishWorkspaceTunnelAsync`, and each jump hop in `BuildChainAsync`.
 
