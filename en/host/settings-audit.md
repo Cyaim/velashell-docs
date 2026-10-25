@@ -590,6 +590,25 @@ or `env | grep TOKEN` land on disk verbatim. A masking stage (`SessionOutputMask
 - **Bytes and lines**: every byte maps to one Latin-1 character before matching; rules and replacements are ASCII, so UTF-8 and GBK round-trip unchanged. Only complete lines are matched; the trailing incomplete line is held back only when it stops in the middle of a value (or inside a private key block), up to 4 KB, while `Password: ` prompts waiting for input and full-screen programs that never print a newline pass through immediately. Whatever is held is masked and released when recording stops.
 - Not done: user-defined rules (meant to share a rule table with "custom highlight rules for terminal output", see `feature-plan.md`); bare values that are neither named nor prefixed (such as a lone base64 line) are not recognized.
 
+**2026-10-25 addendum** (the setting is unchanged; what is masked and how it is recognized changed):
+
+- **Control sequences are stripped before matching**: each line is first projected to its visible text — CSI and short ESC sequences take no position, while the start and the ST of OSC / DCS / SOS / PM / APC each keep one ESC as a boundary (text inside a title or an OSC 8 hyperlink still goes through the rules but never joins the text around it into one value);
+  broken sequences or ones longer than 256 bytes stay visible. All rules run on the visible text and positions are mapped back to the original. Keywords, tokens and values cut apart by grep highlighting, or values colored by jq / bat, are recognized all the same; control sequences inside a masked span are kept right after the `***`, so replay keeps colors and cursor state intact.
+  Context truncation never lands inside a control sequence.
+- **name=value / name: value**: a keyword in the name has to be a whole word — not when it is followed directly by a letter of the same case (`max_tokens`, `tokenizers`, `passwordless`, `SECRETARY` are not masked), while the next camel-case word, a digit, a separator or the end of the name count as boundaries;
+  a plural `s` still counts except for token (`credentials.json`, `client_secrets.json` are still masked). A host name in `user@host` is not taken as a key; with no whitespace after the colon, a value starting with `~` or `/` does not count (`host:~#` prompts, `host:/path`).
+  New keys without password-like words: names ending in `.key` (`tls.key`), names containing `key-data` (kubeconfig `client-key-data`), `.dockerconfigjson` / `.dockercfg`, and Docker `config.json`'s `"auth"` (only a quoted name with a string value).
+  Unquoted values: `name=value` still stops at whitespace; `name: value` (whitespace after the colon: YAML, HTTP headers, `kubectl describe`) is masked to the end of the line, stopping before the next key on the same line (an identifier directly followed by `=` or ": ") or a `#` comment, with an adjacent comma or semicolon left to the next key.
+  An escaped JSON string (`\"…\"`) cut off by a bare outer quote is masked up to that quote, and an empty value `\"\"` no longer masks a backslash.
+- **Others**: `Basic` only takes base64 whose length is a multiple of 4, that decodes, and that contains a colon (`Basic configuration` is left alone); `Bearer` does not take a purely alphabetic English word shorter than 20 characters (`Bearer authentication` is left alone).
+  Prefixed tokens add `github_pat_`. `.netrc` is matched in lower case only: a one-line `machine … login … password secret`, and, when split across lines, a `password secret` line on its own at the start of a line.
+- **Private key blocks**: PEM and OpenPGP (`PGP PRIVATE KEY BLOCK`). Inside a multi-line block only base64 body lines become `***` (line-number and file-name prefixes added by `cat -n`, `nl`, `grep -n` / `grep -A`, color sequences and line endings are kept);
+  blank lines and the `Proc-Type` / `DEK-Info` / `Version` / `Comment` / `Hash` / `Charset` / `MessageID` header lines go through the usual rules and the block continues; a line that cannot belong to a key block (an echoed BEGIN line, truncated output, a prompt) ends the block —
+  before, everything after entering a block was masked line by line with its control sequences erased, so echoing a single BEGIN line blinded the rest of a recording.
+- **What is held back**: besides "the trailing incomplete line is held only in the middle of a value (or inside a private key block)", the value of `name: value` and a netrc password line only end at the end of the line, so they are held until then;
+  an unfinished line inside a key block is held only while it could still be a body / header / END line, and a prompt containing `@ ~ $ # > %` and the like is released at once.
+- Still masked by mistake after the whole-word check: `token_type: Bearer`, `token_endpoint: https://…`, `secretName: tls-cert`, `token_count: 12`.
+
 ### 2026-10-24 Fifteenth batch (tab bar position shown again)
 
 R-05 was withdrawn because the docking layer could only put horizontal tab strips at the top of a pane, so `TabBarPosition` was stored but
