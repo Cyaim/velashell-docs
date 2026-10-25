@@ -649,8 +649,8 @@ split layout too, as a subordinate option. Interaction: the layout templates sec
   The exit path does not query the store; whatever no longer matches at the next start (usually temporary profiles that were never saved, such
   as quick connections) is skipped silently.
 - **Not in the settings file**: the exit layout lives in the SonnetDB `layout_session` collection (one `last` document), named layout
-  templates in the `layout_templates` collection, one document per template; neither travels with settings export or cloud sync, and neither
-  holds passwords.
+  templates in the `layout_templates` collection, one document per template; neither travels with settings export, and neither holds passwords;
+  named templates can travel with cloud sync since 2026-10-25 (a separate file, see the twenty-second batch), while the exit layout is still not synced.
 - It defaults to off so that the existing default behavior of "Restore sessions" does not change; that option itself is untouched and still on
   by default.
 
@@ -810,3 +810,17 @@ The **default of `Security.ConfirmFirstFingerprint` changes from off to on** (ho
   are still let through for the rest of the run; hosts covered by a trusted host CA are unaffected (twentieth batch).
 - The switch keeps its place and wording; its description "When off, the fingerprint is recorded automatically on first connect (TOFU)"
   still holds.
+
+### 2026-10-25 Twenty-second batch (layout templates sync through the cloud)
+
+The named layout templates of the sixteenth batch lived only on the local machine, neither in Gist sync nor in settings export. This batch lets them travel with cloud sync, and adds export / import to the manage window (not settings). Interaction: [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §4C.
+
+| Setting | Default | Values | Notes |
+| --- | --- | --- | --- |
+| Sync scope → Layout templates | On | On / Off (`SyncSettings.SyncLayoutTemplates`) | Under "Cloud Sync → Sync scope", after snippets; stored locally in `app_config/sync`, not in the sync payload. Description: "A separate file merged template by template; templates only record connection IDs, so another device needs the same connections (synced with connection profiles) to open them" |
+
+- **Consumer**: `GistSyncService.LayoutTemplatesInScope` (push, pull, reconcile and restoring a past version). A device with it off neither reads nor writes `velashell-layouts.json` in the Gist; not writing is not deleting, so other devices' templates stay.
+- **On by default**, like app settings, connection profiles and snippets: it goes through the Gist the user already has on, not a new outbound call; templates hold no secrets and are no more sensitive than the connection profiles already syncing (tab titles are often `user@host`, and profiles carry host and user names anyway).
+  Existing sync configurations lack the field and read as on, so the first sync after upgrading pushes the existing templates (`PRIVACY.md` says so).
+- **Why a separate file**: the main payload is pushed whole, so a new section inside it would be dropped by an older client when deserializing and wiped from the cloud when it pushes back (that is how §158's `HiddenBuiltInIds` were lost); older clients only read and write the main file and never touch this one.
+  Merging per template id with deletions kept as 180-day tombstones is described in §4C of the interaction specs; templates, nodes and tabs all carry `JsonExtensionData`, so fields added by newer versions round-trip unchanged.

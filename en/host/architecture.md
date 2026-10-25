@@ -459,6 +459,11 @@ keeps the stored `SortOrder`. In the Gist snapshot these are added fields as wel
 v2: older clients ignore them, and pushing again from one wipes them (only preferences are lost, never
 commands).
 
+Layout templates (synced through the Gist since 2026-10-25) take a different route: they are read and written through `Core/Layouts/LayoutTemplateStore` (a DI singleton shared by the UI and the sync service, with read-modify-write under one lock) in `layout_templates` / `layout_template_tombstones`,
+and neither the UI nor the sync service touches those collections directly. The Gist holds a separate `velashell-layouts.json` with its own `schemaVersion`, merged per template id with tombstones kept for 180 days; the merge rules are in `LayoutTemplateMerge` (a pure function).
+They do not "just add fields" like quick commands because an older client pushing the whole payload back would wipe a new section together with its tombstones, while a separate file is out of its reach. Templates, nodes and tabs carry `JsonExtensionData`, so fields added by newer versions round-trip unchanged;
+local changes raise `Changed` (automatic sync debounces a push on it), and writes from sync raise `SyncApplied` (the manage window reloads on the UI thread without triggering another push).
+
 ### ⚠️ SonnetDB dialect traps
 
 | Trap | Notes |
