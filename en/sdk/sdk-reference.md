@@ -1,6 +1,6 @@
 # Plugin SDK Reference
 
-> Applies to **SDK 2.0.2 / apiLevel 2**
+> Applies to **SDK 2.1.3 / apiLevel 2**
 > See also (other repositories): [Development Guide](../templates/dev-guide.md) (tutorial) · [CLI Manual](../cli/cli.md) · [Packaging and Publishing](../templates/publishing.md)
 
 This page is the **lookup-oriented** view of the SDK: package layout, contract surface, what each
@@ -158,9 +158,9 @@ The host uses a dedicated per-download lease checking remote read/local write, w
 
 Actual length, remote metadata before/after transfer and available digests are checked. Pure SFTP accounts are not required to support exec; a second full download is not the default. Detected source changes fail, but these checks **do not guarantee an atomic remote snapshot**. The commit tests have actually run on Windows and Linux (ext4 and tmpfs under WSL Debian), macOS only through CI; this is not real SSH/GUI end-to-end validation. See [Automation and AI §1.7](../plugins/11-automation-and-ai.md#17-dual-entry-background-ai-downloads-sdk-212) for lifecycle and terminal notification behavior.
 
-### 3.3d File capabilities for plugin protocols (SDK TBD, replace at release time)
+### 3.3d File capabilities for plugin protocols (SDK 2.1.3)
 
-**This is an unpublished SDK contract, not a claim that the host has wired it up.** The contract is on velashell-plugin-sdk's dev; the publisher chooses the version; do not change the version banner or build local packages for downstream repositories. After the official package is published, the host's central dependencies are raised and `PluginProtocolFileService` (link fields, setting modification times, digests) and `RemoteFsCapability.Map` are wired. Everything is additive; `apiLevel` is unchanged.
+**The contract is officially published in SDK 2.1.3 on NuGet.org; the host has not wired it up yet.** Once the host's central dependencies are raised to 2.1.3, `PluginProtocolFileService` (link fields, setting modification times, digests) and `RemoteFsCapability.Map` are wired; until then the host reads none of these. A protocol plugin that uses them declares `minSdkVersion: 2.1.3`. Everything is additive; `apiLevel` is unchanged.
 
 - `RemoteFileEntry` gains two `init` properties (the eight-argument constructor and `Deconstruct` are unchanged): `IsSymbolicLink` is decided by lstat, while `IsDirectory`, `Size` and `LastModified` describe the link's **target** (a broken link keeps the link's own attributes); `LinkTarget` is readlink's raw text and may be relative. The existing `fs/list` / `fs/stat` JSON of isolated processes carries both automatically, and old data without them reads as "not a link".
 - `IProtocolLastWriteTime` (optional, implemented alongside like `IProtocolStreamUpload`): `SetLastWriteTimeAsync(sessionId, path, DateTimeOffset lastWriteTime, ct)`.
@@ -168,14 +168,14 @@ Actual length, remote metadata before/after transfer and available digests are c
 - How "unsupported" is reported: when a protocol does not implement these interfaces, the host reports unsupported; when it does but this session cannot (no MFMT or HASH on the server), it throws `ProtocolUnsupportedException`. Both interfaces are for `inProcess` protocols only (protocols support only `inProcess` anyway), so no RPC is added.
 - Out of scope: **creating** symbolic links on plugin protocols still has no contract, and the host's `CreateSymbolicLinkAsync` still reports unsupported.
 
-### 3.3e Transfers refused before they start (SDK TBD, replace at release time)
+### 3.3e Transfers refused before they start (SDK 2.1.3)
 
-**This is an unpublished SDK contract; the host does not throw it yet.** The publisher chooses the version; do not change the version banner.
+**The contract is officially published in SDK 2.1.3 on NuGet.org; the host does not throw it yet.**
 
 - `PluginTransferRejectedException` (derives from `InvalidOperationException`, deliberately not `IOException`; sealed) carries `Reason` (`RemoteTransferRejectReason`: `Unknown = 0`, `SourceNotFound`, `SourceInUse`, `QuotaExceeded`, `InsufficientSpace`). The RPC error code is `RpcErrorCodes.TransferRejected = "transfer-rejected"`, on the wire `transfer-rejected:source-in-use`; an unknown or missing suffix restores as `Unknown`; it comes before `InvalidOperationException` in `FromException`.
 - Throwing it guarantees that the job was not registered, no transferId was created, nothing was read or written, and the OperationId was not recorded in the ledger. A plugin may try again once conditions change (the same OperationId will not hit "arguments differ"), but should not retry automatically right away.
 - Keep it apart from the other two outcomes: "result unknown" can only be resolved by fetching the receipt again with the same OperationId; "user denied" (`PluginPermissionDeniedException`) is pointless to retry. Invalid arguments, unsupported platforms, missing sessions and OperationId argument conflicts keep their existing exception types. `IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` gained `<exception>` documentation.
-- The current host (before the release) still throws the old types for these pre-registration refusals (for example, too little snapshot space is a `Failed` / `insufficient-space` snapshot, §3.3b).
+- The current host (not switched over yet) still throws the old types for these pre-registration refusals (for example, too little snapshot space is a `Failed` / `insufficient-space` snapshot, §3.3b).
 
 ### 3.4 UI and extension points
 
@@ -284,9 +284,9 @@ Three things that bite:
 > button on a **window title bar**, is always a 24×24 stroke glyph, and has no notion of fill or
 > view box (see [the development guide §5.9](../templates/dev-guide.md)).
 
-### 3.7 Posting to the message center (SDK TBD, replace at release time)
+### 3.7 Posting to the message center (SDK 2.1.3)
 
-**This is an unpublished SDK contract; the host has not implemented it.** The contract is on velashell-plugin-sdk's dev; the publisher chooses the version; do not change the version banner. After the package is published, the host implements the in-process `PluginUiApi` and the isolated `ui/notify` route, rate limiting, per-plugin muting, the message source and cleanup on uninstall; until then `SupportsNotifications` is false.
+**The contract is officially published in SDK 2.1.3 on NuGet.org; the host has not implemented it yet.** Next the host implements the in-process `PluginUiApi` and the isolated `ui/notify` route, rate limiting, per-plugin muting, the message source and cleanup on uninstall; until then `SupportsNotifications` is false. A plugin that uses it declares `minSdkVersion: 2.1.3` and still checks `SupportsNotifications` before calling.
 
 ```csharp
 if (ctx.Ui.SupportsNotifications)
@@ -308,12 +308,12 @@ if (ctx.Ui.SupportsNotifications)
 - `IUiApi.SupportsNotifications` (default false) and `PostNotificationAsync(notification, ct)` (default implementation throws `NotSupportedException`) both have default implementations, so existing implementations still compile. It returns `PluginNotificationOutcome`: `Unknown = 0`, `Posted`, `AlreadyPosted`, `Muted`, `RateLimited`.
 - Conventions: the message center takes only messages **worth keeping and reading again**; progress, runtime state, operation receipts and debugging output do not belong there ([message center and feed](../host/message-center-and-feed.md) §1). De-duplication comes before rate limiting: posting the same id again returns `AlreadyPosted` and does not count; each plugin may post at most 6 new messages a minute (the host may be stricter), beyond which it returns `RateLimited` without throwing; when the user has muted the plugin it returns `Muted`. Messages survive restarts within the message center's overall cap; uninstalling a plugin deletes its messages; a plugin cannot edit or withdraw a posted message. Action commands are best declared in the manifest's `contributes.commands`, so clicking works even before the plugin is activated.
 - Permissions: no new permission — the ordinary `ui.contributions` already includes "notifications (rate limited)" ([06 §1](../plugins/06-permission-system.md)); `notifications.system` is about operating-system notifications and unrelated. The user's control lives on the host side: per-plugin muting on the plugin management page.
-- Isolated processes: RPC `ui/notify` (`UiNotifyRequest` / `UiNotifyResponse`), with the handshake's `HandshakeResponse.SupportsNotifications` false when absent ([IPC §7.4](../plugins/05-ipc-protocol.md)).
+- Isolated processes: RPC `ui/notify` (`UiNotifyRequest` / `UiNotifyResponse`), with the handshake's `HandshakeResponse.SupportsNotifications` false when absent ([IPC §7.4](../plugins/05-ipc-protocol.md#74-notifications-pre-start-refusals-and-whole-frame-writes-sdk-213)).
 - Test double `FakeUi`: `SupportsNotifications` (default true), `NotificationRequests` (every post), `PostedNotifications` (the ones actually queued), a `NotificationOutcome` script (to simulate rate limiting and muting) and `PluginId`; validation and de-duplication match the host, and `TestPluginContext` passes its PluginId on to it.
 
-### 3.8 Version comparison `SemanticVersion` (SDK TBD, replace at release time)
+### 3.8 Version comparison `SemanticVersion` (SDK 2.1.3)
 
-**This is an unpublished SDK contract.** The host, the CLI and the marketplace switch their own version comparisons to it once the package is published; until then each keeps its own.
+**Officially published in SDK 2.1.3 on NuGet.org.** The host, the CLI and the marketplace have not switched their own version comparisons to it yet, so for now each keeps its own; each switches once it moves to 2.1.3.
 
 - `VelaShell.PluginSdk.Versioning.SemanticVersion` (readonly struct): `Major` / `Minor` / `Patch` / `Revision` (the fourth part, 0 when absent), `PreRelease` / `BuildMetadata` (never null), `IsPreRelease`; `TryParse` / `Parse` (throws `FormatException` when invalid).
 - `CompareTo` follows the full SemVer 2.0 §11 precedence: `beta.2 < beta.10`, numeric identifiers compare by length then ordinally without overflow at any length, numeric identifiers rank below alphanumeric ones, alphanumeric ones compare in ASCII order case-sensitively, and with everything else equal more identifiers rank higher; build metadata is kept but not compared (`Equals` / `GetHashCode` agree).
@@ -362,6 +362,7 @@ and **2.0 onwards is `apiLevel 2`**.
 | **2.1.0** | `StreamSudoAsync`, non-sensitive sudo events/results and a dedicated fake; execution-operation negotiation, cancellation and ordered complete notifications. Officially published; see §3.3a. | Required when used (`2.1.0`); declared by the AI manifest |
 | **2.1.1** | Independent upload jobs: `SupportsTransferOperations`, `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`, `RemoteTransferSnapshot` and the `fs/transfer/*` RPCs. Officially published; see §3.3b. | Required when used (`2.1.1`) |
 | **2.1.2** | Independent download jobs: `SupportsDownloadOperations`, `StartDownloadAsync` / `RemoteDownloadOptions`, snapshot `Direction` / `Phase`, and the `fs/transfer/startDownload` RPC. Officially published; see §3.3c. | Required when used (`2.1.2`); declared by the AI manifest |
+| **2.1.3** | File capabilities for plugin protocols: `RemoteFileEntry.IsSymbolicLink` / `LinkTarget`, `IProtocolLastWriteTime`, `IProtocolChecksum` and `RemoteChecksumAlgorithm` (§3.3d); transfers refused before they start, `PluginTransferRejectedException` and the `transfer-rejected` error code (§3.3e); posting to the message center, `IUiApi.PostNotificationAsync` and `ui/notify` (§3.7); version comparison `SemanticVersion` (§3.8); `RpcConnection` writes a frame whole or not at all ([IPC §7.4](../plugins/05-ipc-protocol.md#74-notifications-pre-start-refusals-and-whole-frame-writes-sdk-213)). Officially published; not yet wired in the host. Additive, `apiLevel` unchanged. | Required when used (`2.1.3`); the whole-frame fix involves no plugin code and takes effect with the package bump |
 
 ### Migrating to 2.0
 
@@ -407,7 +408,7 @@ public async Task Activate_RegistersCommand()
 
 Available doubles: `CollectingLogger`, `InMemoryStorage`, `InMemoryTimeSeries`, `FakeSessions`,
 `FakeRemoteFs`, `FakeRemoteExec`, `FakeRemoteTunnel`, `FakeTerminal`, `FakeTerminalViewApi`,
-`FakeUi` (with notification members from SDK TBD on, see §3.7), `FakeSecrets`, `FakeClipboard`, `RecordingCommands`, `RecordingProtocols`,
+`FakeUi` (with notification members from SDK 2.1.3 on, see §3.7), `FakeSecrets`, `FakeClipboard`, `RecordingCommands`, `RecordingProtocols`,
 `RecordingWorkspaces`, `TestHostEvents`, `TestHostInfo`.
 
 Besides `AddConnected`, `FakeSessions` offers `AddSaved` (build a saved configuration) and three hooks:
