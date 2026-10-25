@@ -146,7 +146,7 @@ public interface IPluginSettings   // Permission: settings.own (normal)
 
 Permission: `ui.contributions` (normal). Includes commands/menu items/status-bar dynamic updates, VelaUI surfaces (panels and document pages), dialogs (Message/Confirm/Input/QuickPick), in-app notifications (rate limit: ≤6 per plugin per minute), and progress indicators (in the status bar or notifications).
 
-> The actual contract for in-app notifications (SDK 2.1.3, not yet wired in the host): `IUiApi.SupportsNotifications` / `PostNotificationAsync(PluginNotification)`,
+> The actual contract for in-app notifications (SDK 2.1.3, now wired in the host): `IUiApi.SupportsNotifications` / `PostNotificationAsync(PluginNotification)`,
 > returning `Posted` / `AlreadyPosted` / `Muted` / `RateLimited`; de-duplicated by id before rate limiting (6 per plugin per minute), only for messages worth keeping and reading again,
 > with actions limited to the plugin's own commands and no URL field. See [SDK §3.7](../sdk/sdk-reference.md#37-posting-to-the-message-center-sdk-213).
 

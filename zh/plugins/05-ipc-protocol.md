@@ -180,7 +180,7 @@ SDK 契约、严格发送/半帧失败回归，以及正式 SDK 2.1.0 装配后�
 
 ### 7.4 通知、启动前被拒与整帧写入（SDK 2.1.3）
 
-**以下契约已随 SDK 2.1.3 正式发布到 NuGet.org。** `ui/notify` 与 `transfer-rejected` 宿主尚未接；整帧写入不用改代码，抬包即生效。
+**以下契约已随 SDK 2.1.3 正式发布到 NuGet.org。** `ui/notify` 与 `transfer-rejected` 已由宿主接上；整帧写入不用改代码，抬包即生效。
 
 - **`ui/notify`**（`PluginRpc.UiNotify`，`UiNotifyRequest(PluginNotification)` / `UiNotifyResponse(PluginNotificationOutcome)`）：隔离插件往消息中心发通知。握手 `HandshakeResponse.SupportsNotifications` 缺席时为 false，
   这时 PluginHost 在插件进程里直接抛 `NotSupportedException`；支持时先本地校验再发请求。语义见 [SDK §3.7](../sdk/sdk-reference.md#37-往消息中心发通知sdk-213)。
