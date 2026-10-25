@@ -32,7 +32,7 @@
 | C-01 | P0 | 终端 Bell、视觉闪烁 | 真实运行时冲突 | `VisualBell=true` 会覆盖“系统提示音”和“静音”,因为实际判断为 `VisualBell \|\| BellMode == "visual"` | 删除独立 `VisualBell`,只保留“系统提示音 / 视觉闪烁 / 不提示”三态 Bell 设置;迁移旧配置 | `AppSettings.cs:222,226`;`VelaTerminalControl.cs:217-220,472`;`MainWindowViewModel.cs:1565-1566` | ✅ 已完成(2026-07-11):`BellMode` 成为唯一权威;`VisualBell` 仅保留为迁移槽位,两个设置服务载入时经 `AppSettings.Normalize()` 迁移为 `BellMode=visual` 并清除旧值;终端控件属性与设置页独立开关已删除 |
 | C-02 | P1 | 最大重试 | 多个运行时权威 | 设置中的 `General.MaxRetries` 控制一部分自动重连流程,但 `TerminalTabViewModel` 仍把最大尝试次数硬编码为 3 | 重命名为“最大自动重连次数”,让全部自动重连路径读取同一个值 | `AppSettings.cs:65`;`MainWindowViewModel.cs:1325`;`TerminalTabViewModel.cs:297` | ✅ 已完成:`TerminalTabViewModel.MaxReconnectAttempts` 改为可写属性,由宿主在断开处理时按设置下发;UI 改名“最大自动重连次数”并移入“行为 > 自动重连”从属位置(范围 1-20) |
 | C-03 | P1 | 关闭前确认、最小化到托盘 | 未说明的优先级 | 启用最小化到托盘后,窗口关闭会先最小化,不进入关闭确认流程 | 将名称改为“退出应用前确认”,描述中说明最小化到托盘时不触发 | `AppSettings.cs:55,78`;`MainWindow.axaml.cs:297-310` | ✅ 已完成:改名“退出应用前确认”,描述明确托盘优先;托盘项描述同时说明“经托盘菜单「退出」才真正退出” |
-| C-04 | P1 | 显示隐藏文件 | 设置与会话状态不一致 | 文件浏览器工具栏只修改当前 ViewModel,没有写回持久化设置 | 推荐将工具栏切换写回 `Transfer.ShowHiddenFiles`;否则从设置中心移除并明确为会话状态 | `AppSettings.cs:276`;`MainWindowViewModel.cs:508`;`FileBrowserViewModel.cs:80,248-260` | ✅ 已完成:工具栏切换经 `ShowHiddenFilesToggled` 回调写回并保存 `Transfer.ShowHiddenFiles`;设置保存后广播同步所有已打开的文件面板;设置页描述注明两处联动 |
+| C-04 | P1 | 显示隐藏文件 | 设置与会话状态不一致 | 文件浏览器工具栏只修改当前 ViewModel,没有写回持久化设置 | 推荐将工具栏切换写回 `Transfer.ShowHiddenFiles`;否则从设置中心移除并明确为会话状态 | `AppSettings.cs:276`;`MainWindowViewModel.cs:508`;`FileBrowserViewModel.cs:80,248-260` | ✅ 已完成:工具栏切换经 `ShowHiddenFilesToggled` 回调写回并保存 `Transfer.ShowHiddenFiles`;设置保存后广播同步所有已打开的文件面板;设置页描述注明两处联动;2026-10-25 起单栏、双栏文件标签的远端栏也在内(此前文件标签不读也不写) |
 | C-05 | P1 | 回滚缓冲行数 | 默认值不一致 | 设置模型默认 50000,SettingsViewModel 默认 10000 | 只保留一个默认值来源,推荐由 `AppSettings` 或默认配置工厂提供 | `AppSettings.cs:19`;`SettingsViewModel.cs:114` | ✅ 已完成:VM 初始值改为取自 `new AppSettings()`,不再自行声明业务默认值 |
 | C-06 | P1 | 默认语言 | 默认值不一致 | 设置模型为 `zh-CN`,ViewModel 为 `en` | 统一默认值来源 | `AppSettings.cs:8`;`SettingsViewModel.cs:90` | ✅ 已完成:同 C-05,VM 初始值取自设置模型 |
 | C-07 | P1 | 光标样式 | 默认值不一致 | 设置模型为 `bar`,终端控件内部默认 `block` | 终端控件从设置模型应用默认值,避免自行声明业务默认值 | `AppSettings.cs:218`;`VelaTerminalControl.cs:145` | ✅ 已完成:控件默认值对齐模型(`bar`),并注释说明运行时由 `ApplyLiveTerminalSettings` 下发 |
@@ -632,7 +632,7 @@ C-08 留下的「选择性导出」。导出原先是整份 `AppSettings`(只抹
   一个字节都没动就按原起点再试;续传关着整份重来。重试用完仍失败,错误条写「重试 N 次后仍然失败:…」。
 - **不重试的**:同会话复制(服务端一次操作);面板拆掉(标签关闭、会话断开)之后不在原会话上重试 —— 那种在文件面板发起的批次里转成
   「已暂停」,点「继续」换连接接着传(传输队列,存在 SonnetDB 的 `transfer_queue` 集合,重启后还原为已暂停、不自动连接;不是设置项)。
-- 单栏 / 双栏文件标签打开时拿的是设置快照(既有行为),改了这一项之后已开着的文件标签要重开才生效;终端侧边栏的文件面板随保存刷新。
+- 设置保存后,终端侧边栏的文件面板与开着的单栏 / 双栏文件标签一起换上新值(文件标签 2026-10-25 起;此前要重开标签)。
 - 已知漏网:续传下载与双栏中转直接读 SSH 库交出来的流,断线时的异常没经翻译层,认不出,按不重试处理。
 
 ### 2026-10-24 第十九批(自动下载更新接线)

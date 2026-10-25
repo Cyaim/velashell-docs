@@ -2,6 +2,8 @@
 
 > Date written: 2026-07-22　　Baseline code: `tmds-ssh` branch
 >
+> Status re-checked: 2026-10-25 against the code on dev; finished items keep their original description and are marked ✅ for traceability
+>
 > Purpose: **decision checklist**. List the gaps between VelaShell's dual-pane SFTP and WinSCP item by item, so features can be selected for future implementation.
 > Each item is marked with its current status and implementation cost. Anything not verified is marked "unverified"; no assumptions are made.
 
@@ -28,22 +30,22 @@ The gaps are concentrated in three layers, and **they must be handled differentl
 
 These are **not "not implemented"; they are "implemented but not connected"**. Users will report them as bugs, while the cost to fix them is low.
 
-| # | Problem | Location | Symptom |
-|---|---|---|---|
-| A1 | **The external editor always reports "not configured" in the dual-pane view** | `SftpDocumentViewModel.cs:33-40` does not assign `GetDefaultEditorPath` | The editor configured in settings cannot be used. The terminal-side host is wired (`MainWindowViewModel.cs:846`), but the dual-pane view is missing it |
-| A2 | **The local pane header cannot sort** | `LocalFilePaneView.axaml:128-138` uses plain `TextBlock` headers | `SortCommand` (`LocalFilePaneViewModel.cs:49`) and `ToggleSort:499` are fully available, but not bound |
-| A3 | **The transfer popup cannot cancel, retry, or clear an individual item** | `FileTransferView.axaml` binds only `CancelAllCommand` and `HidePanelCommand` | Three commands (`FileTransferViewModel.cs:106-112`) have no corresponding controls. **Also, `RetryTransfer:419` only changes the state and does not resend**, so connecting the UI would still be a no-op |
-| A4 | **The entire `TransferManager` queue has zero call sites** | `Core/Sftp/TransferManager.cs` | Queuing, concurrency, and cancellation are implemented and DI is registered, but production code never calls `QueueTransferAsync`. The browser uses `SemaphoreSlim` directly |
-| A5 | **The remote pane has no button for the parent directory** | `GoUpCommand` (`FileBrowserViewModel.cs:648`) has no axaml binding | The only option is double-clicking the `..` row. The local pane has a button |
-| A6 | **The remote pane cannot be restored after being closed in the dual-pane view** | `ToggleVisibilityCommand` → `IsVisible=false` | This button was designed for the terminal host, which has a reopen path. In the dual-pane view, clicking it leaves only empty space |
-| A7 | **Transfer settings in the dual-pane view are a construction-time snapshot** | `SftpDocumentViewModel.cs:36-37` | Changes to settings do not affect already-open SFTP documents. `OnSettingsSaved` only traverses the terminal-side cache |
-| A8 | **The dual-pane view does not read or write column visibility and hidden-file settings** | `SftpDocumentViewModel.cs:33-40` | The terminal side wires `ShowHiddenFiles` and `ColumnVisibilityToggled`; the dual-pane view does not |
-| A9 | **`DownloadItemCommand` is not bound** | `FileBrowserViewModel.cs:670` | This also makes `PickSavePathForDownload`, "save as when downloading a single file", unreachable from the UI |
-| A10 | **Rate limiting is not applied to resumed downloads** | The resume branch in `SftpService.cs` does not wrap the stream in `ThrottledStream` | Bandwidth limiting silently stops working during resumable transfers |
-| A11 | **The transfer log records Copy as DOWNLOAD** | `TransferLogService.cs:40` uses a ternary that distinguishes only Upload and everything else | The log type is inaccurate |
-| A12 | **Dragging a file from the OS into the local pane refreshes but does not copy** | `LocalFilePaneView.axaml.cs:234-243` | Nothing happens after the drop |
+| # | Status | Problem | Location | Symptom |
+|---|---|---|---|---|
+| A1 | ✅ Fixed 2026-07-22: single- and dual-pane file tabs pass the default-editor resolver to the remote pane | **The external editor always reports "not configured" in the dual-pane view** | `SftpDocumentViewModel.cs:33-40` does not assign `GetDefaultEditorPath` | The editor configured in settings cannot be used. The terminal-side host is wired (`MainWindowViewModel.cs:846`), but the dual-pane view is missing it |
+| A2 | ✅ 2026-10-25: the local pane's three headers sort on click, with ▲ / ▼ on the active column, same rules as the remote pane | **The local pane header cannot sort** | `LocalFilePaneView.axaml:128-138` uses plain `TextBlock` headers | `SortCommand` (`LocalFilePaneViewModel.cs:49`) and `ToggleSort:499` are fully available, but not bound |
+| A3 | ⚠️ Retry and "Clear finished" wired on 2026-07-23 (a failed row's Retry really re-probes the resume offset and resends); **per-item cancel is still missing**: the command exists, but `CancelTransfer` only changes the state and notifies the unused `TransferManager`, so the transfer keeps running | **The transfer popup cannot cancel, retry, or clear an individual item** | `FileTransferView.axaml` binds only `CancelAllCommand` and `HidePanelCommand` | Three commands (`FileTransferViewModel.cs:106-112`) have no corresponding controls. **Also, `RetryTransfer:419` only changes the state and does not resend**, so connecting the UI would still be a no-op |
+| A4 | ❌ Still zero call sites (pending decision: delete or migrate, see the host's `feature-plan.md`) | **The entire `TransferManager` queue has zero call sites** | `Core/Sftp/TransferManager.cs` | Queuing, concurrency, and cancellation are implemented and DI is registered, but production code never calls `QueueTransferAsync`. The browser uses `SemaphoreSlim` directly |
+| A5 | ✅ 2026-10-25: a Go-up button next to Refresh on the remote toolbar; the two panes' buttons are titled "Go up (local pane)" / "Go up (remote pane)" | **The remote pane has no button for the parent directory** | `GoUpCommand` (`FileBrowserViewModel.cs:648`) has no axaml binding | The only option is double-clicking the `..` row. The local pane has a button |
+| A6 | ✅ 2026-07-29: the remote pane's close button is hidden in file tabs (shown only in the terminal side pane) | **The remote pane cannot be restored after being closed in the dual-pane view** | `ToggleVisibilityCommand` → `IsVisible=false` | This button was designed for the terminal host, which has a reopen path. In the dual-pane view, clicking it leaves only empty space |
+| A7 | ✅ 2026-10-25: after settings are saved, open single- and dual-pane file tabs pick up the new transfer options immediately | **Transfer settings in the dual-pane view are a construction-time snapshot** | `SftpDocumentViewModel.cs:36-37` | Changes to settings do not affect already-open SFTP documents. `OnSettingsSaved` only traverses the terminal-side cache |
+| A8 | ✅ 2026-10-25: file-tab remote panes take hidden files and columns from the settings; toggling saves the setting and syncs the other open panes | **The dual-pane view does not read or write column visibility and hidden-file settings** | `SftpDocumentViewModel.cs:33-40` | The terminal side wires `ShowHiddenFiles` and `ColumnVisibilityToggled`; the dual-pane view does not |
+| A9 | ❌ Still no entry point (pending decision on how it interacts with the conflict policy) | **`DownloadItemCommand` is not bound** | `FileBrowserViewModel.cs:670` | This also makes `PickSavePathForDownload`, "save as when downloading a single file", unreachable from the UI |
+| A10 | ✅ 2026-10-25: resumed downloads honour the bandwidth limit too | **Rate limiting is not applied to resumed downloads** | The resume branch in `SftpService.cs` does not wrap the stream in `ThrottledStream` | Bandwidth limiting silently stops working during resumable transfers |
+| A11 | ✅ 2026-09-28: the log records UPLOAD / DOWNLOAD / COPY / RELAY by direction | **The transfer log records Copy as DOWNLOAD** | `TransferLogService.cs:40` uses a ternary that distinguishes only Upload and everything else | The log type is inaccurate |
+| A12 | ❌ Still only refreshes, and the cursor still shows the drop as allowed (pending decision) | **Dragging a file from the OS into the local pane refreshes but does not copy** | `LocalFilePaneView.axaml.cs:234-243` | Nothing happens after the drop |
 
-> **Duplicate definitions**: `AppSettings.AutoResume` (:623) and `ResumeEnabled` (:668) overlap semantically; only the latter is consumed.
+> **Duplicate definitions**: `AppSettings.AutoResume` (:623) and `ResumeEnabled` (:668) overlap semantically; only the latter is consumed (`AutoResume` is now a legacy field kept only so old settings files load; nothing consumes it at runtime — see [settings-audit.md](settings-audit.md) M-02).
 > `TransferMaxRetries` (:671) and `AutoCleanTempFiles` (:674) have code comments admitting that they are "planned, with no runtime consumer".
 > (Later: `AutoCleanTempFiles` was wired on 2026-07-23 and `TransferMaxRetries` on 2026-10-24 — temporary failures such as a dropped connection or a timeout are retried with back-off, under File Transfer → Conflict handling → "Retry failed transfers".)
 
@@ -55,7 +57,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 
 | WinSCP capability | VelaShell | Description |
 |---|---|---|
-| Editable path input | ❌ None | Both sides have only breadcrumbs, so a path cannot be pasted directly for navigation. **High-frequency basic need** |
+| Editable path input | ✅ Implemented | Remote pane #226, local pane 2026-10-12: the pencil button / a click on the empty space after the breadcrumbs / `Ctrl+L` turn it into an input box, Enter navigates; see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §6 |
 | Forward/back history | ❌ None | Neither VM has a history stack |
 | Bookmarks/favorites | ✅ Implemented (2026-10-14) | A bookmark entry on the dual-pane document toolbar stores a local-directory ↔ remote-directory pair per connection, with add, apply, edit, delete, and persistence; remote ↔ remote pairs and access history are not included |
 | Directory history dropdown | ❌ None | |
@@ -74,8 +76,8 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | chmod | ⚠️ Single file only | Has a 9-cell rwx matrix with octal synchronization, but **no batch operation, recursive application, or setuid/sticky bits** |
 | chown, change owner/group | ⚠️ Single file only, SFTP only (implemented 2026-09-30) | Owner and Group in the properties dialog are editable drop-downs: suggestions come from the remote passwd / group databases (the same lookup that turns ids into names in the list), and a numeric UID / GID can be typed directly; changing only one keeps the other as it is; combined with a permission change, chown runs before chmod. FTP has no standard command and the plugin SDK has no such contract, so both rows stay read-only there. Like chmod, **no batch operation or recursion** |
 | Create/identify symbolic links | ✅ Implemented (2026-09-12) | Link rows have dedicated icons and a "→ target" tooltip, the permission string starts with `l`, and links to directories can be opened directly; the context menu has "New Symbolic Link". Deleting removes only the link itself, copying produces a link (`cp -P`), and folder downloads do not descend into nested directory links. On FTP, links can be created only on servers that support `SITE SYMLINK`; plugin protocols cannot create them |
-| **Modify remote timestamps** | ❌ None | Timestamps are preserved only during download; uploads do not write back mtime |
-| Local file attributes/permissions | ❌ None | The local pane has only 5 context-menu items |
+| **Modify remote timestamps** | ⚠️ Only written back by transfers | SFTP uploads and downloads both write back the modification time per "Preserve timestamps" (uploads set it on the same handle before closing); `ISftpService.SetLastWriteTimeAsync` exists (used by directory sync, FTP via `MFMT`; plain FTP uploads do not write it back). **What is missing is a UI to change the time by hand** (in the properties dialog) |
+| Local file attributes/permissions | ❌ None | Local pane context menu: Refresh, Open, Upload, Rename, New folder, Delete |
 
 ### 3.3 Transfers
 
@@ -86,7 +88,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | **Double-click transfer** | ❌ Different semantics | Double-clicking remote files downloads them and opens them with an OS program; double-clicking a local file **does nothing** |
 | Conflict handling, overwrite/skip/rename/ask | ✅ All four | Very good quality |
 | Resumable transfers | ✅ Implemented | Includes offset verification and a safe fallback window |
-| Rate limiting/concurrency | ✅ Implemented | See A10 |
+| Rate limiting/concurrency | ✅ Implemented | |
 | **Transfer queue, visualizable, pausable, reorderable** | ⚠️ Partial (2026-10-24) | WinSCP's queue is a core part of its experience. Upload / download batches left unfinished by a disconnect or an exit are parked as "Paused" and restored after a restart, and "Resume" continues from the partial files (stored in SonnetDB `transfer_queue`, see [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §9); manual pausing and reordering are still missing (see also A4) |
 | **Post-transfer verification, checksum** | ❌ None | |
 | Completion notification | ✅ Implemented | |
@@ -99,8 +101,8 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | **Wildcard selection (`*.log`)** | ❌ None | WinSCP's `Select Files` is a frequent operation |
 | **Invert selection** | ❌ None | |
 | **Recursive selection** | ❌ None | |
-| Select all | ⚠️ Only through the default ListBox behavior | No explicit `Ctrl+A` binding |
-| **Keyboard shortcuts (F5/F2/Del/Enter)** | ❌ Completely absent | Neither View has `KeyBindings` or `KeyDown` handling. **WinSCP veterans will find this very unfamiliar** |
+| Select all | ⚠️ Only through the default ListBox behavior | The ListBox's own `Ctrl+A` (when the list has focus); no menu entry |
+| **Keyboard shortcuts (F5/F2/Del/Enter)** | ⚠️ Partial | Enter opens a folder, type-to-select and `Ctrl+L` exist (2026-10-12); F2 / Delete / F5 are still missing. **WinSCP veterans will find this very unfamiliar** |
 
 ### 3.5 Search and Filtering
 
@@ -114,7 +116,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | WinSCP capability | VelaShell | Description |
 |---|---|---|
 | Built-in editor + automatic upload on save | ✅ Implemented, 5MB limit | **Syntax highlighting added on 2026-07-22**, see the next section |
-| External editor | ⚠️ See A1 | Logic is complete, but not wired into the dual-pane view |
+| External editor | ✅ Implemented | A1 fixed |
 | **File preview pane** | ❌ None | |
 
 ### 3.7 Views
@@ -122,7 +124,7 @@ These are **not "not implemented"; they are "implemented but not connected"**. U
 | WinSCP capability | VelaShell | Description |
 |---|---|---|
 | Sort remote pane by column / column visibility / resize columns | ✅ Implemented | |
-| Local-pane sorting | ⚠️ See A2 | |
+| Local-pane sorting | ✅ Implemented (2026-10-25) | See A2 |
 | **Remember column widths across restarts** | ❌ None | Exists only in the VM instance |
 | **Remember pane ratio** | ❌ None | GridSplitter can be dragged but the value is not persisted |
 | **Local pane has only 3 columns** | ❌ | Missing permissions/owner/group/type |
@@ -185,16 +187,16 @@ This project **already has a complete terminal stack**, so the architectural fou
 Ordered purely by return on investment, for reference:
 
 **First tier, low cost and highly visible**
-1. Category A wiring debt (A1, A2, A3, A5, A6, A7, A8), the items users treat as bugs
+1. ~~Category A wiring debt (A1, A2, A3, A5, A6, A7, A8), the items users treat as bugs~~ — done except A3's per-item cancel; the remaining A3 / A4 / A9 / A12 wait for decisions, see the host's `feature-plan.md`
 2. Keyboard shortcuts (F5 refresh / F2 rename / Del delete / Enter enter / Ctrl+A select all)
-3. Editable path input
+3. ~~Editable path input~~ — done
 4. Current-directory filter box
 
 **Second tier, moderate cost and clear demand**
 5. Wildcard selection / invert selection
 6. Visual transfer queue (A4 + individual cancel and retry)
 7. Persist column widths and pane ratio
-8. Complete the local pane, sorting, hidden-file toggle, and create file
+8. Complete the local pane, ~~sorting~~, hidden-file toggle, and create file
 9. Drop onto a target-folder row
 
 **Third tier, high cost and differentiation**

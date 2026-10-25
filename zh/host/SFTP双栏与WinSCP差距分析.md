@@ -2,6 +2,8 @@
 
 > 编写日期：2026-07-22　　基准代码：`tmds-ssh` 分支
 >
+> 状态核对：2026-10-25（对照 dev 的代码逐项核过；已完成的保留原描述并标 ✅，便于回溯）
+>
 > 用途：**决策清单**。逐项列出 VelaShell 双栏 SFTP 与 WinSCP 的差距，供后续挑选要实现的功能。
 > 每一项都标注了当前状态与实现代价，未核实的一律标注"未核实"，不做推测。
 
@@ -29,22 +31,22 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 
 这些**不是"没做"，是"做了但没接上"**。用户会当成 bug 报，修复成本却很低。
 
-| # | 问题 | 位置 | 现象 |
-|---|---|---|---|
-| A1 | **外部编辑器在双栏里永远报"未配置"** | `SftpDocumentViewModel.cs:33-40` 未赋值 `GetDefaultEditorPath` | 用户在设置里配了编辑器也用不了。终端侧宿主有接（`MainWindowViewModel.cs:846`），双栏漏了 |
-| A2 | **本地栏表头无法排序** | `LocalFilePaneView.axaml:128-138` 表头是纯 `TextBlock` | `SortCommand`（`LocalFilePaneViewModel.cs:49`）与 `ToggleSort:499` 完整可用，就是没绑 |
-| A3 | **传输浮窗无法单条取消 / 重试 / 清空** | `FileTransferView.axaml` 只绑了 `CancelAllCommand`、`HidePanelCommand` | 三个命令（`FileTransferViewModel.cs:106-112`）没有对应控件。**且 `RetryTransfer:419` 本身只改状态不重发**，接上 UI 也是空动作 |
-| A4 | **`TransferManager` 整套队列零调用点** | `Core/Sftp/TransferManager.cs` | 排队 + 并发 + 取消都实现了、DI 也注册了，但生产代码从不调用 `QueueTransferAsync`。浏览器自己用 `SemaphoreSlim` 跑 |
-| A5 | **远端栏"上级目录"没有按钮** | `GoUpCommand`（`FileBrowserViewModel.cs:648`）无 axaml 绑定 | 只能双击 `..` 行。本地栏有按钮 |
-| A6 | **双栏关掉远端栏后无法恢复** | `ToggleVisibilityCommand` → `IsVisible=false` | 该按钮是给终端宿主设计的（那边有重开路径），双栏里点了就只剩空白 |
-| A7 | **双栏的传输设置是构造时快照** | `SftpDocumentViewModel.cs:36-37` | 改了设置对已打开的 SFTP 文档不生效；`OnSettingsSaved` 只遍历终端侧缓存 |
-| A8 | **双栏不读/不写列显示与隐藏文件设置** | `SftpDocumentViewModel.cs:33-40` | 终端侧接了 `ShowHiddenFiles`、`ColumnVisibilityToggled`，双栏没接 |
-| A9 | **`DownloadItemCommand` 无绑定** | `FileBrowserViewModel.cs:670` | 连带 `PickSavePathForDownload`（"下载单文件时另存为"）在 UI 上不可达 |
-| A10 | **续传下载不套限速** | `SftpService.cs` 续传分支未包 `ThrottledStream` | 断点续传时带宽限制静默失效 |
-| A11 | **传输日志把 Copy 记成 DOWNLOAD** | `TransferLogService.cs:40` 三元只区分 Upload/其它 | 日志类型不准 |
-| A12 | **OS 拖文件到本地栏只刷新、不复制** | `LocalFilePaneView.axaml.cs:234-243` | 拖进去什么也没发生 |
+| # | 状态 | 问题 | 位置 | 现象 |
+|---|---|---|---|---|
+| A1 | ✅ 2026-07-22 已修：单栏、双栏文件标签都把「默认编辑器」解析回调传给远端栏 | **外部编辑器在双栏里永远报"未配置"** | `SftpDocumentViewModel.cs:33-40` 未赋值 `GetDefaultEditorPath` | 用户在设置里配了编辑器也用不了。终端侧宿主有接（`MainWindowViewModel.cs:846`），双栏漏了 |
+| A2 | ✅ 2026-10-25：本地栏三列表头可点排序，当前列带 ▲ / ▼，规则同远端栏 | **本地栏表头无法排序** | `LocalFilePaneView.axaml:128-138` 表头是纯 `TextBlock` | `SortCommand`（`LocalFilePaneViewModel.cs:49`）与 `ToggleSort:499` 完整可用，就是没绑 |
+| A3 | ⚠️ 重试与「清理已完成」2026-07-23 已接（失败行「重试」会真的重新探续传起点重传）；**单条取消仍没有**：命令在，`CancelTransfer` 只改状态、通知的是没人用的 `TransferManager`，传输停不下 | **传输浮窗无法单条取消 / 重试 / 清空** | `FileTransferView.axaml` 只绑了 `CancelAllCommand`、`HidePanelCommand` | 三个命令（`FileTransferViewModel.cs:106-112`）没有对应控件。**且 `RetryTransfer:419` 本身只改状态不重发**，接上 UI 也是空动作 |
+| A4 | ❌ 仍是零调用点（待定：删掉还是迁过去，见宿主 `feature-plan.md`） | **`TransferManager` 整套队列零调用点** | `Core/Sftp/TransferManager.cs` | 排队 + 并发 + 取消都实现了、DI 也注册了，但生产代码从不调用 `QueueTransferAsync`。浏览器自己用 `SemaphoreSlim` 跑 |
+| A5 | ✅ 2026-10-25：远端栏工具条挨着刷新加「上一级」；两栏的上一级钮提示语分别是「本地栏上一级」「远程栏上一级」 | **远端栏"上级目录"没有按钮** | `GoUpCommand`（`FileBrowserViewModel.cs:648`）无 axaml 绑定 | 只能双击 `..` 行。本地栏有按钮 |
+| A6 | ✅ 2026-07-29：文件标签里远端栏的关闭钮不显示（只在终端侧栏出现） | **双栏关掉远端栏后无法恢复** | `ToggleVisibilityCommand` → `IsVisible=false` | 该按钮是给终端宿主设计的（那边有重开路径），双栏里点了就只剩空白 |
+| A7 | ✅ 2026-10-25：设置保存后开着的单栏、双栏文件标签当场换上新的传输选项 | **双栏的传输设置是构造时快照** | `SftpDocumentViewModel.cs:36-37` | 改了设置对已打开的 SFTP 文档不生效；`OnSettingsSaved` 只遍历终端侧缓存 |
+| A8 | ✅ 2026-10-25：文件标签的远端栏打开时按设置显示隐藏文件与各列，切换写回设置并同步到其它开着的面板 | **双栏不读/不写列显示与隐藏文件设置** | `SftpDocumentViewModel.cs:33-40` | 终端侧接了 `ShowHiddenFiles`、`ColumnVisibilityToggled`，双栏没接 |
+| A9 | ❌ 仍没入口（待定口径：与冲突策略的关系） | **`DownloadItemCommand` 无绑定** | `FileBrowserViewModel.cs:670` | 连带 `PickSavePathForDownload`（"下载单文件时另存为"）在 UI 上不可达 |
+| A10 | ✅ 2026-10-25：续传下载同样受带宽限制 | **续传下载不套限速** | `SftpService.cs` 续传分支未包 `ThrottledStream` | 断点续传时带宽限制静默失效 |
+| A11 | ✅ 2026-09-28：日志按方向记 UPLOAD / DOWNLOAD / COPY / RELAY | **传输日志把 Copy 记成 DOWNLOAD** | `TransferLogService.cs:40` 三元只区分 Upload/其它 | 日志类型不准 |
+| A12 | ❌ 仍只刷新，且拖进来时光标照样显示可放下（待定） | **OS 拖文件到本地栏只刷新、不复制** | `LocalFilePaneView.axaml.cs:234-243` | 拖进去什么也没发生 |
 
-> **重复定义**：`AppSettings.AutoResume`（:623）与 `ResumeEnabled`（:668）语义重叠，只有后者被消费。
+> **重复定义**：`AppSettings.AutoResume`（:623）与 `ResumeEnabled`（:668）语义重叠，只有后者被消费（`AutoResume` 现为遗留字段，只为读旧配置保留、运行时不消费，见 [settings-audit.md](settings-audit.md) M-02）。
 > `TransferMaxRetries`（:671）、`AutoCleanTempFiles`（:674）代码注释自认"规划中，无运行时消费者"。
 > （后续：`AutoCleanTempFiles` 2026-07-23 接线；`TransferMaxRetries` 2026-10-24 接线 —— 断线、超时这类临时失败按次数退避重试，设置页「文件传输 → 冲突处理 → 失败自动重试」。）
 
@@ -56,7 +58,7 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 
 | WinSCP 能力 | VelaShell | 说明 |
 |---|---|---|
-| 可编辑路径输入框 | ❌ 无 | 两侧都只有面包屑，无法直接粘贴路径跳转。**高频刚需** |
+| 可编辑路径输入框 | ✅ 已实现 | 远端栏 #226、本地栏 2026-10-12：铅笔钮 / 点面包屑后的空白 / `Ctrl+L` 切成输入框，回车跳转；见[交互与界面规格.md](交互与界面规格.md) §6 |
 | 前进 / 后退历史 | ❌ 无 | 两个 VM 都没有历史栈 |
 | 书签 / 收藏夹 | ✅ 已实现（2026-10-14） | 双栏文档顶部收藏入口：按连接保存本地目录 ↔ 远程目录配对，支持新增、应用、编辑、删除与持久化；暂不包含双远程配对与访问历史 |
 | 目录访问历史下拉 | ❌ 无 | |
@@ -75,8 +77,8 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 | chmod | ⚠️ 仅单文件 | 有 9 格 rwx 矩阵 + 八进制同步，但**无批量、无递归应用、无 setuid/sticky 位** |
 | chown（改属主/属组） | ⚠️ 仅单文件、仅 SFTP（2026-09-30 实现） | 属性弹窗里属主 / 属组是可编辑下拉：候选取自远端 passwd / group（与列表显示名称同一张查表），也可直接填数字 UID / GID；只改一项时另一项沿用当前值；与权限一起改时先 chown 再 chmod。FTP 没有标准命令、插件协议 SDK 没有这一面，两行只读。与 chmod 一样**无批量、无递归** |
 | 符号链接创建 / 识别 | ✅ 已实现（2026-09-12） | 链接行有专用图标与「→ 目标」提示，权限串首字符为 `l`，指向目录的链接可直接进入；右键「新建符号链接」。删除只删链接本身、复制得到链接（`cp -P`）、文件夹下载不跟进嵌套的目录链接。FTP 仅支持 `SITE SYMLINK` 的服务器可创建，插件协议不支持创建 |
-| **修改远端时间戳** | ❌ 无 | 仅下载时保留时间戳；上传不回写 mtime |
-| 本地文件属性 / 权限 | ❌ 无 | 本地栏右键只有 5 项 |
+| **修改远端时间戳** | ⚠️ 只随传输回写 | SFTP 上传、下载都按「保留时间戳」回写修改时间（上传在关闭前按同一句柄设）；`ISftpService.SetLastWriteTimeAsync` 已有（目录同步在用，FTP 走 `MFMT`；FTP 普通上传不回写），**缺的是手动改时间的界面**（属性弹窗） |
+| 本地文件属性 / 权限 | ❌ 无 | 本地栏右键：刷新、打开、上传、重命名、新建文件夹、删除 |
 
 ### 3.3 传输
 
@@ -87,7 +89,7 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 | **双击传输** | ❌ 语义不同 | 远端双击 = 下载并用 OS 程序打开；本地双击文件 = **什么都不做** |
 | 冲突处理（覆盖/跳过/重命名/询问） | ✅ 四种齐全 | 质量很好 |
 | 断点续传 | ✅ 已实现 | 含起点核实与安全回退窗口 |
-| 限速 / 并发数 | ✅ 已实现 | 但见 A10 |
+| 限速 / 并发数 | ✅ 已实现 | |
 | **传输队列（可视化、可暂停、可调序）** | ⚠️ 部分（2026-10-24） | WinSCP 的队列是核心体验。断线 / 退出时没传完的上传下载批次挂成「已暂停」、重启后还原，点「继续」从半截接着传（落在 SonnetDB `transfer_queue`，见[交互与界面规格.md](交互与界面规格.md) §9）；手动暂停与调序仍没有（另见 A4） |
 | **传输后校验（checksum）** | ❌ 无 | |
 | 完成通知 | ✅ 已实现 | |
@@ -100,8 +102,8 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 | **通配符选择（`*.log`）** | ❌ 无 | WinSCP 的 `Select Files` 是高频操作 |
 | **反选** | ❌ 无 | |
 | **递归选择** | ❌ 无 | |
-| 全选 | ⚠️ 仅靠 ListBox 默认行为 | 无显式 `Ctrl+A` 绑定 |
-| **键盘快捷键（F5/F2/Del/Enter）** | ❌ 全无 | 两个 View 都没有 `KeyBindings`，也没有 `KeyDown` 处理。**WinSCP 老用户会非常不适应** |
+| 全选 | ⚠️ 仅靠 ListBox 默认行为 | ListBox 自带的 `Ctrl+A`（焦点在列表里时），没有菜单入口 |
+| **键盘快捷键（F5/F2/Del/Enter）** | ⚠️ 部分 | 回车进文件夹、键入定位、`Ctrl+L` 已有（2026-10-12）；F2 / Delete / F5 仍没有。**WinSCP 老用户会非常不适应** |
 
 ### 3.5 搜索与过滤
 
@@ -115,7 +117,7 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 | WinSCP 能力 | VelaShell | 说明 |
 |---|---|---|
 | 内置编辑器 + 保存自动回传 | ✅ 已实现（5MB 上限） | **2026-07-22 已补语法高亮**，见下节 |
-| 外部编辑器 | ⚠️ 见 A1 | 逻辑完整，双栏没接线 |
+| 外部编辑器 | ✅ 已实现 | A1 已修 |
 | **文件预览面板** | ❌ 无 | |
 
 ### 3.7 视图
@@ -123,7 +125,7 @@ VelaShell 目前是一个**做得相当扎实的单向文件传输器**，但还
 | WinSCP 能力 | VelaShell | 说明 |
 |---|---|---|
 | 远端按列排序 / 列显隐 / 列宽拖拽 | ✅ 已实现 | |
-| 本地栏排序 | ⚠️ 见 A2 | |
+| 本地栏排序 | ✅ 已实现（2026-10-25） | 见 A2 |
 | **列宽跨重启记忆** | ❌ 无 | 仅存在于 VM 实例 |
 | **分栏比例记忆** | ❌ 无 | GridSplitter 可拖但不持久化 |
 | **本地栏只有 3 列** | ❌ | 无权限/属主/属组/类型 |
@@ -181,16 +183,16 @@ SFTP 文档目前是纯双栏（`SftpDocumentView.axaml` 无终端控件）。
 纯粹从"投入产出比"排，供参考：
 
 **第一梯队（低成本、高感知）**
-1. A 类接线债（A1、A2、A3、A5、A6、A7、A8）——用户当成 bug 的那些
+1. ~~A 类接线债（A1、A2、A3、A5、A6、A7、A8）——用户当成 bug 的那些~~ —— 除 A3 的单条取消外都已完成；剩下的 A3 / A4 / A9 / A12 待定口径，见宿主 `feature-plan.md`
 2. 键盘快捷键（F5 刷新 / F2 重命名 / Del 删除 / Enter 进入 / Ctrl+A 全选）
-3. 可编辑路径输入框
+3. ~~可编辑路径输入框~~ —— 已完成
 4. 当前目录过滤框
 
 **第二梯队（中等成本、明确需求）**
 5. 通配符选择 / 反选
 6. 传输队列可视化（A4 + 单条取消重试）
 7. 列宽与分栏比例持久化
-8. 本地栏补齐（排序、隐藏文件开关、新建文件）
+8. 本地栏补齐（~~排序~~、隐藏文件开关、新建文件）
 9. 拖放到目标文件夹行
 
 **第三梯队（高成本、差异化）**
