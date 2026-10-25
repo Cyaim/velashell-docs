@@ -303,10 +303,8 @@ The timer ticks on a fixed half-hour, and the interval setting decides whether a
 
 ## 7. Not done yet
 
-- **Plugin-published notifications**: the contract (`IUiApi.PostNotificationAsync`, `ui/notify`) is published in SDK 2.1.3, and the host has not
-  wired it yet (see [SDK reference §3.7](../sdk/sdk-reference.md#37-posting-to-the-message-center-sdk-213)); until then the host's `IUiApi` implementation only has `ShowPanelAsync`. The host-side interface is already shaped for this
-  (`commandId` navigation works for plugin-registered commands); what remains is on the host side: delivery on the in-process and
-  isolated routes, the 6-per-plugin-per-minute rate limit, per-plugin muting on the plugin management page, a source field on messages and per-plugin cleanup on uninstall.
 - **OS-level notifications** (Windows notification centre / macOS notifications): everything is in-app
   for now.
 - **Grouping and search**: with a 200-item cap, the "Unread" filter is enough for the moment.
+
+In-app plugin notifications (`IUiApi.PostNotificationAsync` / `ui/notify`) are now wired into the message center. They support in-process and isolated plugins, plugin identity validation, at most six new messages per plugin per minute, persistent per-plugin muting, message sources and uninstall cleanup. See [SDK reference §3.7](../sdk/sdk-reference.md#37-posting-to-the-message-center-sdk-213) for the contract.

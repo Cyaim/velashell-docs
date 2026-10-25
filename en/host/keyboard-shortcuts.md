@@ -282,6 +282,13 @@ The shared-password list that pops up against the cursor row when a password pro
 | Open the selected file or folder | `Double Click` | — |
 | Jump to the item whose name starts with what you type | `Type the name` | — |
 | Open the selected folder | `Enter` | — |
+| Refresh the current directory | `F5` | While this pane has focus (not the input field) |
+| Rename the selected entry | `F2` | Only while the list has focus |
+| Delete the selected entry (with confirmation) | `Delete` | Only while the list has focus |
+| Clear and collapse the filter box | `Esc` | Only while the filter box has focus |
+| Return from the filter box to the file list | `Enter` | Only while the filter box has focus |
+| Go back to the previous directory | `Alt+←` | While this pane has focus (not the input field) |
+| Go forward to the directory before going back | `Alt+→` | While this pane has focus (not the input field) |
 
 ### File Operations
 

@@ -149,7 +149,7 @@ The download contract is officially published in SDK 2.1.2 on NuGet.org; host ce
 
 ### 7.4 Notifications, pre-start refusals and whole-frame writes (SDK 2.1.3)
 
-**These contracts are officially published in SDK 2.1.3 on NuGet.org.** The host has not wired `ui/notify` or `transfer-rejected` yet; whole-frame writes need no code change and take effect with the package bump.
+**These contracts are officially published in SDK 2.1.3 on NuGet.org.** The host has wired `ui/notify` and `transfer-rejected`; whole-frame writes need no code change and take effect with the package bump.
 
 - **`ui/notify`** (`PluginRpc.UiNotify`, `UiNotifyRequest(PluginNotification)` / `UiNotifyResponse(PluginNotificationOutcome)`): an isolated plugin posting to the message center. The handshake's `HandshakeResponse.SupportsNotifications` is false when absent,
   in which case PluginHost throws `NotSupportedException` inside the plugin process; when supported it validates locally first, then sends the request. Semantics in [SDK §3.7](../sdk/sdk-reference.md#37-posting-to-the-message-center-sdk-213).
