@@ -770,7 +770,17 @@ user’s call via “Reconnect” (the same principle as “a tunnel the user st
 **Allow the algorithms with one click after a negotiation failure** (since 2026-10-24): when algorithm negotiation fails and the peer offers algorithms this version implements but has not enabled (the ones named by the “one more line on what to do” of §13.1), the terminal tab's failure card gets an outlined button between “Copy” and “Reconnect”: “Allow these algorithms and reconnect” (warning-colored icon; tooltip: “Appends … to the custom (category) list in the connection's SSH options (after the defaults), then reconnects.”).
 - It first asks “Allow these algorithms?”: the text names the connection, the category and the algorithms line by line, and says only these are added, the other legacy algorithms stay off, and they are weaker than the defaults; buttons “Allow and reconnect” / Cancel. Cancel leaves the profile untouched and does not reconnect.
 - After confirmation, **only the algorithms the diagnosis named** are appended with `+` to that category's custom list in the profile of **the hop that failed** (the destination, or the jump host found by following “Jump host”); the “Allow legacy algorithms” switch is not touched. A list that already replaces the defaults or starts with `+` gets them appended; one written with `-` / `^` is rewritten as the full list in effect right now with them appended (freezing the defaults at this moment). What changes is the stored profile (saved through the workflow, without the password typed this time), and for the destination hop the tab's own copy as well; then it reconnects in place. A temporary profile rebuilt from “Recent connections” is not in the database, so only this attempt changes; when the jump host's profile cannot be found, you are told to edit its SSH options by hand and nothing reconnects.
-- No button when this version implements none of the peer's algorithms (typically an old device that only speaks CBC), or when the failure was not a negotiation failure. Standalone SFTP, connection diagnostics and the profile dialog's “Test” do not have it.
+- No button when this version implements none of the peer's algorithms (typically an old device that only speaks CBC), or when the failure was not a negotiation failure.
+- **Three more entry points** (since 2026-10-25; before, only terminal tabs had it):
+  - **The failure card of document-style connections** (standalone SFTP documents, and the SSH / SFTP pane of a dual-remote document): the same “Allow these algorithms and reconnect” above “Reconnect”; after confirming, the stored profile is changed (for the destination hop also the copy the card's “Reconnect” uses), then the card's own retry runs, and the button goes away on retry.
+    Only SSH / SFTP profiles get it — a plugin workbench reaching out through an SSH tunnel is not connected with this profile, so it does not. In a dual-remote document the failing pane is the one changed.
+  - **The connection diagnostics window**'s issue card (§15): “Allow these algorithms and diagnose again” below the description (tooltip “… then runs the diagnosis again.”), confirmed with “Allow and diagnose again”; after confirming, the stored profile is changed and the diagnosis runs once more with a changed **copy** for the destination hop
+    (the copy passed in by the caller is left alone); when a jump host's profile cannot be found or written, the reason appears below the button. If the store was changed, the explorer refreshes after the window closes. The confirmation is owned by the diagnostics window.
+  - **The profile dialog's “Test”** failing (§13.1 feedback bar): “Allow these algorithms and test again” below the error (tooltip “Appends … to the custom (category) list in the SSH options (after the defaults), then tests again.”), confirmed with “Allow and test again”.
+    The destination hop is the profile being edited, so **only the form changes**: the custom algorithm lists expand and that category gets the remedied value, and the confirmation ends with “This changes the list in this form only; it is stored when you click Save or Connect.” — other unsaved edits in the form are not saved behind the user's back;
+    when the failing hop is a jump host, that host's own profile is changed and saved on the spot. When the error changes (a new test, a failed save) the button goes away.
+  - All four share the confirmation title “Allow these algorithms?” and the same way of naming them; only the last sentence of the body (then reconnects / diagnoses again / tests again) and the confirm button differ.
+  - Jump hosts are found the same way the connection chain is built: the first hop comes from the "Jump host" of the profile the connection uses (in the profile dialog, the one chosen in the form), the rest from the store — before, counting started from the stored copy, so a temporary profile rebuilt from "Recent connections" could not find its jump host.
 
 ### Connecting State
 
@@ -818,6 +828,8 @@ failure had nowhere to go”; now it has somewhere.
   than wrapping them in another “Failed to connect to X:” that prints the same address twice.
 - The credential prompt still runs behind its serialization gate: restoring several sessions at startup fires
   them concurrently, and two modal dialogs over the same owner deadlock each other.
+- When the failure is an algorithm negotiation failure and the peer offers algorithms this version implements but has not enabled, the card gets
+  “Allow these algorithms and reconnect” above “Reconnect” (since 2026-10-25; rules in “Allow the algorithms with one click after a negotiation failure” above).
 
 ### Background Activity Ring (status bar, bottom right)
 
@@ -1411,8 +1423,9 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       version implements but has not enabled, the message names them and points here (“Allow legacy algorithms” or the
       custom lists); when there are none, it says plainly that enabling more will not help (typically an old device
       that only speaks CBC). The terminal tab's failure card also offers an “Allow these algorithms and reconnect” button
-      that appends the named ones to the custom list in one click (since 2026-10-24, see “Allow the algorithms with one
-      click after a negotiation failure” in §7).
+      that appends the named ones to the custom list in one click — so do the failure card of document-style connections, the connection
+      diagnostics window and this dialog's “Test” feedback bar, as “… and reconnect / diagnose again / test again” (terminal tabs since 2026-10-24,
+      the others since 2026-10-25; see “Allow the algorithms with one click after a negotiation failure” in §7).
     - **Agent endpoint** (since 2026-10-25, `SshSessionOptions.AgentEndpoint`, a new "SSH Agent" section at the bottom of the "SSH options" page, for SSH and SFTP): a single-line input,
       with the placeholder “System default — or a named pipe `\\.\pipe\name`, or a socket's full path” on Windows / “System default (SSH_AUTH_SOCK) — or a socket path such as `~/.1password/agent.sock`” elsewhere.
       Grey text: “Leave empty for the system default agent (SSH_AUTH_SOCK; on Windows the OpenSSH Authentication Agent service, or Pageant when that service is not running). When set, this connection talks only to that agent: SSH agent authentication, agent forwarding and "Add keys to agent" all use it, like IdentityAgent in ssh_config.”
@@ -1512,7 +1525,8 @@ Since 2026-09-30 the dialog is a “protocol rail on the left + paged form on th
       UTC−12:00 … UTC+14:00 become null. A chosen value puts the dot on the “Advanced” tab.
 - **Feedback strip**: the result of Test / Save (one accent line on success; on failure the error text + a copy button)
   is pinned above the footer, outside the scrolling form — when the user presses Test their eyes are on the footer, and
-  the answer must not land somewhere scrolled out of view.
+  the answer must not land somewhere scrolled out of view. When “Test” fails on algorithm negotiation, “Allow these algorithms and test again”
+  appears below the error (since 2026-10-25; rules in §7).
 - **Footer**: left = a destination preview (monospace 11px `text-tertiary`, after the protocol icon): `user@host:port`
   for SSH, `sftp://` / `ftp://` / `ftps://` for SFTP / FTP (explicit and implicit FTPS both count as `ftps`), IPv6
   literals in brackets, no user for anonymous FTP or credential-less plugin protocols, no port for protocols declaring
@@ -1935,6 +1949,7 @@ Open these as tabs or standalone floating windows. All can also be entered from 
     (numbers without a fixed name read “key exchange method (31)”, “authentication method (60)”, “local extension (200)”, “unassigned (9)”, and 192 / 193 read `PING` / `PONG`), `1,180 B` (`—` for authentication packets we send), `#sequence`, `ch N`;
     on a jump chain, a line above names the hop `user@host:port` whenever it changes. Without an SSH connection in this run: “This run did not get as far as an SSH connection (an earlier step failed, or there are no saved credentials), so there is no protocol trace.”; past the limit: “N more packet(s) went past the recording limit and were not recorded.”
   - The exported report ends with the same text (headed “Protocol trace (packet metadata only, no contents; lengths of authentication packets we send are not recorded)”). **The tap is attached only for diagnostics**; the profile page's "Test" and ordinary connections do not get it.
+  - When the authentication step fails on algorithm negotiation and the peer offers algorithms this version implements but has not enabled, the issue card has “Allow these algorithms and diagnose again” below its description (since 2026-10-25; rules in “Allow the algorithms with one click after a negotiation failure” in §7).
 
 ---
 
