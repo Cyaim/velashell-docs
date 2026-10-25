@@ -16,7 +16,7 @@ is documented on `Core/Notifications/INotificationCenter`; read it before adding
 
 | | Message center | Runtime alerts |
 | --- | --- | --- |
-| Examples | Update available, product news, CVE advisories, last run ended unexpectedly, local encryption key could not be read | Fingerprint change, session drop, transfer failure |
+| Examples | Update available, product news, CVE advisories, last run ended unexpectedly, local encryption key could not be read, external-edit drafts left by the last run | Fingerprint change, session drop, transfer failure |
 | Presentation | Bell badge + list, revisitable | Dialog / status bar / tab flash, gone once seen |
 | Retention | Across restarts (SonnetDB `notifications`) | None (security events also go to the audit log) |
 | Owner | `INotificationCenter` | `ISecurityAlertService` / individual panels |
@@ -265,6 +265,17 @@ case post nothing.
 
 - No action link: the way back is re-entering the password in the login dialog when connecting (existing behaviour).
 - Posted in parallel with the update check, which may spend minutes downloading in the background, so these do not queue behind it; the periodic feed refresh does not post them again.
+
+## 4B. Local content source: external-edit drafts (since 2026-10-25)
+
+Each external-edit draft left by the last run (a session still open when the app crashed, a copy deliberately kept after a failed upload; see “Crashes and drafts” in [interaction-and-ui-specs.md](interaction-and-ui-specs.md) §6 for how drafts are told apart) gets one message:
+
+- Kind "System", warning; id `remote-edit-draft:<subdirectory name>` — republished at every start and de-duplicated by that id, keeping its read state.
+- Title "External edit not uploaded"; the body says which file, which path on which machine, and where the local copy is; an old copy without a state marker cannot name the remote path and says instead that it "may contain changes that were not uploaded".
+- The action "Open folder" runs `commandId = files.remoteEditDrafts.open` (the command palette has "Open external edit drafts folder" too): with a single draft it opens that subdirectory, otherwise the `remote-edit` root,
+  with each draft's full path in its body. A message-center action is just a command without parameters, so a draft cannot be re-uploaded from here — that needs a connection to that server first, and the session went away with the last run.
+- The publication time is when the draft was first found, not its modification time: the list is sorted by publication time and drops the oldest past 200, so a draft from months ago would sink to the bottom or be pushed out right away.
+- Once a draft has been deleted (the user dealt with it), its message is removed at the next start. Posted only at start-up (the directory scan runs on the thread pool); a draft left during a run is reported in the file panel on the spot and listed at the next start.
 
 ## 5. Storage and limits
 

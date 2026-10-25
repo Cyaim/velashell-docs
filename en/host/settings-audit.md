@@ -171,7 +171,7 @@ Key Management and Snippets are moved out of the Settings Center and become stan
 | Connection | Automatic Reconnect | Automatic reconnect, maximum attempts, reconnect interval | Hide subordinate settings when automatic reconnect is disabled |
 | Connection | Authentication Preferences | Remember password, default authentication key | Provide a link to Key Management |
 | File Transfer | Paths and Editor | Local download directory, default editor | Retain |
-| File Transfer | Remote Editing | When double-clicking a file (`Transfer.DoubleClickAction`: system default program / built-in editor / configured editor, system default by default), upload after editing (`Transfer.AutoUploadOnEdit`, on by default) | Shown. Turning auto-upload off = local copies opened by external programs are not watched and nothing is uploaded on wrap-up either; the built-in editor's Save still uploads. The three entry points and the upload rules are in Interaction and UI Specs §6 |
+| File Transfer | Remote Editing | When double-clicking a file (`Transfer.DoubleClickAction`: system default program / built-in editor / configured editor, system default by default), upload after editing (`Transfer.AutoUploadOnEdit`, on by default) | Shown. Turning auto-upload off = local copies opened by external programs are not watched and nothing is uploaded on wrap-up either; the built-in editor's Save still uploads. The three entry points and the upload rules are in Interaction and UI Specs §6. Both settings descriptions were corrected on 2026-10-25: the double-click one no longer says all three upload automatically, and the auto-upload one says it only governs the external programs |
 | File Transfer | Transfer Behavior | Maximum concurrency, preserve timestamps (an SFTP upload sets the modification time on the same handle before closing, one round trip), flush uploads to disk (`Transfer.FsyncAfterUpload`, off by default: `fsync@openssh.com` before an SFTP upload is closed, skipped on servers without it, and a failed flush fails the upload), conflict handling, show hidden files, completion notification, delete remote folders with rm -rf (`Transfer.UseRecursiveDeleteCommand`, on by default) | The hidden-file state must be unified; the `rm -rf` entry must state three things: it applies **only to SSH sessions that have an exec channel** (standalone SFTP / FTP / plugin protocols always walk the tree over SFTP), it **falls back to the SFTP walk automatically** when the command is unavailable or exits non-zero, and **there is no per-entry progress** on that path (the bar goes indeterminate, and cancelling can only close the channel). The delete confirmation prompt is unchanged |
 | File Transfer | Bandwidth Limits | Master switch, upload limit, download limit | Hide both rate fields when disabled |
 | File Transfer | Transfer Logs | Record logs, retention days, storage path | Hide subordinate settings when logging is disabled |
@@ -723,8 +723,8 @@ nothing beyond the item being transferred, with nothing on disk, so it was wired
   connecting; not a setting).
 - After settings are saved, the terminal sidebar's file panel and open single- / dual-pane file tabs pick up the new value together (file tabs
   since 2026-10-25; before, the tab had to be reopened).
-- Known gap: resumed downloads and dual-pane relays read the SSH library's raw stream, so the exception on a dropped connection there is not
-  translated, goes unrecognized and is not retried.
+- Resumed downloads and dual-pane relays read a remote file stream that throws the neutral exceptions too (since 2026-10-25, `TranslatingSftpStream`), so a dropped
+  connection is retried as a temporary failure; before, that stream was the SSH library's raw one and its exceptions went unrecognized and were not retried.
 
 ### 2026-10-24 Nineteenth batch (download updates automatically wired up)
 

@@ -164,12 +164,13 @@ The rules:
   can search.
 - **No injection path**: the script body is a fixed constant, and user input is passed only as single-quoted positional parameters
   (`sh -c '<script>' vela-search '<root>' '<pattern>' …`), quoted by the rules of the login shell.
-- **Only options BusyBox also has**; `/proc`, `/sys` and `/dev` are skipped only when searching from `/`; links are not followed. Names use
+- **Only options BusyBox also has** (including `-maxdepth`, `tr` and `grep -q`); `/proc`, `/sys` and `/dev` are skipped only when searching from `/`; links are not followed. Names use
   `find` wildcards (no wildcard means "name contains"), content is a literal match only (`grep -F`), with no regex option.
 - **Limits**: 500 items and 2 minutes, both fixed; hitting either says honestly that the results are incomplete, and the user can stop at any
   time, closing the window stops it too.
-- Known limits: result paths are decoded as UTF-8, so Chinese names on a GBK server show replacement characters in the results and clicking
-  one only reaches its folder; names containing a newline split into two results.
+- Known limits: on a very old BusyBox whose `find` lacks `-exec … +`, a content search finds nothing and names containing a newline still
+  split into two results (since 2026-10-25 results are decoded with the session encoding, the search arguments are sent in it too, and a name
+  with a newline counts as one result; before, Chinese names on a GBK server showed replacement characters and newline names split in two).
 - The "current directory filter box" is still missing (3.5).
 
 ### C3. Terminal Integration

@@ -556,8 +556,8 @@ Save the current split panes and tabs as a named template and reopen the same se
       The temporary copy is deleted when the window closes; copies left behind by a crash or a killed process are swept in
       the background after the next start (since 2026-10-24: only subdirectories of `builtin-edit` named with 8 hex digits,
       deleted once neither the directory nor anything in it has changed for 7 days; what cannot be deleted waits for the next
-      start; no message). Drafts deliberately kept by the two external-program paths (`remote-edit`, see below) after a
-      failed upload are never deleted automatically.
+      start; no message). The two external-program paths (`remote-edit`, see below) are cleaned up separately, by the state
+      marker each session leaves (see “Crashes and drafts” below).
     - **Right-click “Open with default editor”**: hands the file to the program configured in “Settings → File Transfer →
       Default editor” (a full path or command name on Windows, a command name on Linux, an app name on macOS, started with
       `open -a`). When none is configured, a “No default editor configured” dialog offers to jump straight to that settings page.
@@ -577,19 +577,38 @@ Save the current split panes and tabs as a named template and reopen the same se
       (path) instead of overwriting it.”
     - **The editor process is not tracked** (a single-instance editor's launcher hands the path to the running instance
       and exits; whether a process has exited says nothing about whether the file is still open). A session ends only in
-      two cases: when its SFTP document tab (single or dual pane) closes, finishing the last upload before SFTP is
-      disconnected (waiting up to 2 minutes); and when the app exits (waiting up to 5 seconds). Sessions opened from the
-      terminal side panel's file browser have no first exit and stay until the app exits.
+      two cases: when the panel it belongs to is torn down — an SFTP document tab (single or dual pane) or a terminal tab
+      closes, finishing the last upload before SFTP / SSH is disconnected (waiting up to 2 minutes; terminal tabs since
+      2026-10-25 — before, sessions opened from the terminal side panel's file browser had no such exit and stayed until the
+      app exited); when the terminal drops, its side panel is torn down and its editing sessions end with it, and since the
+      connection is already gone, anything not uploaded is kept as a draft with its location reported; and when the app
+      exits (waiting up to 5 seconds).
     - A failed upload: the transfer row turns red, the file panel reports “Remote update failed (file name): reason”, and
       the local copy stays. Anything still not uploaded at wrap-up keeps its copy and temporary directory, with the message
       “X was not uploaded. Your edited copy is kept at (path).”; the temporary directory is deleted only once everything
       is uploaded. There is no permanent “editing” status anywhere in the UI (removed 2026-09-08).
+    - **Crashes and drafts** (since 2026-10-25): each session writes `.vela-edit.json` in its own subdirectory (clean / has
+      changes not uploaded, plus the file name, remote path, server name and connection profile id; when clean, the length and
+      modification time of the copy that matches the remote). It is written clean on opening and on a clean re-download, dirty
+      as soon as a save is seen, and clean again once an upload succeeds with nothing new pending. At start-up a background scan
+      (only subdirectories named with 8 hex digits, skipping sessions that are open) deletes copies whose marker says clean
+      **and** whose length and modification time still match, once untouched for 7 days; those with changes not uploaded,
+      without a marker (left by older versions), or whose copy no longer matches a clean marker are all **drafts, never deleted
+      automatically**, and each is listed in the message center ("External edit not uploaded", with the file, server and remote
+      path, and where the local copy is; see [message-center-and-feed.md](message-center-and-feed.md) §4B) with the action
+      "Open folder" (command `files.remoteEditDrafts.open`: with a single draft it opens that subdirectory, otherwise the
+      `remote-edit` root); once a draft has been deleted, its message is removed at the next start. A draft cannot be
+      re-uploaded from the message center.
   - **The two remote-editing settings** (Settings → File Transfer → “Remote editing” section):
     - **Double-click a file** (`Transfer.DoubleClickAction`: `system` (default) / `builtin` / `editor`; any other stored
-      value reads as `system`); its description reads “All three open a local copy and upload it back on every save”.
+      value reads as `system`); its description reads “The built-in editor uploads when you save; the other two upload every
+      save while "Upload automatically after editing" is on” (corrected on 2026-10-25; it used to say “All three open a local
+      copy and upload it back on every save”, which did not hold with the switch off).
     - **Upload automatically after editing** (`Transfer.AutoUploadOnEdit`, on by default): off = the local copy is not
       watched at all, nothing is sent back, and nothing is uploaded when the tab closes or the app exits either. It only
-      governs the two external-program paths; the built-in editor's Save is itself the upload and is not affected.
+      governs the two external-program paths; the built-in editor's Save is itself the upload and is not affected. The
+      settings page describes it as “Applies to the external editor and the system default app: when off, their local copy is
+      not watched and nothing is sent back. Saving in the built-in editor always uploads”.
   - **Remote-editing diagnostic log** `<data root>/logs/remote-edit.log` (by default `~/.velashell/logs/remote-edit.log`;
     it moves with the data root when `--data-root` changes it): always on, one line per event as `time [stage] detail`,
     stages being open / watch / upload / close — enough to see whether the watcher got the event, whether the upload
@@ -613,7 +632,7 @@ Save the current split panes and tabs as a named template and reopen the same se
     - With a UTF-8 session encoding (the default), nothing changes: undecodable bytes show as replacement characters, but opening, deleting and renaming still hit the original bytes (lossless round trip).
     - With an encoding such as GBK, file names are decoded and encoded in it; bytes that are invalid in that encoding are not guaranteed to round-trip. An unrecognized encoding name falls back to UTF-8's lossless round trip.
     - The encoding is taken when connecting (a reconnect takes it again); switching the encoding temporarily from the status bar only affects the terminal, not a file panel already open. FTP and plugin protocols are not affected.
-    - Paths in remote search results (below) do not follow this and are decoded as UTF-8.
+    - Remote search (below) follows it too: results are decoded with it, and the search location, file name and containing text are sent to the server encoded in it (since 2026-10-25).
   - **Symbolic links**: the icon is `folder-symlink` (points to a directory, amber, double-click to enter) or `file-symlink` (points to a file, or the link is broken); hovering the name shows “→ target”; the Type column reads “Symbolic Link”; the permission string starts with `l`; the properties dialog adds a “Link Target” row.
     - **Delete** removes only the link itself and never touches the target; recursive deletes also remove nested links as links. Before descending into a subdirectory, a non-following stat confirms it is a real directory —
       the SFTP draft does not say whether listing attributes come from lstat or stat, and when a server reports followed attributes, a link to a directory looks like a real directory in the listing.
@@ -631,7 +650,7 @@ Save the current split panes and tabs as a named template and reopen the same se
   - **Directory bookmarks** (since 2026-10-14): the document toolbar provides "Save current directories" and "Bookmarks". Each bookmark stores a name, an absolute local directory, and an absolute remote directory for the current connection; the list applies both paths together and supports editing and deletion. "Manage bookmarks" opens a dedicated management window.
     - Saving normalizes the local path and remote POSIX path and de-duplicates by the normalized local + remote pair; saving does not check whether either directory currently exists. Leading and trailing spaces in the remote path are kept as typed (a POSIX directory name may begin or end with a space; the name is still trimmed). A relative path resolves against the remote pane's current directory; `~` and `~/x` expand with the remote pane's home directory and `~user` is expanded by the server. If expansion fails, the bookmark is rejected ("Could not expand “~”: the remote home directory is unknown. Enter an absolute path.") instead of being stored as "current directory/~/x".
     - Applying navigates both panes in parallel. A failed side keeps its previous path and shows that pane's error; a successful side is not rolled back. A bookmark is not deleted when a directory is unavailable.
-    - Bookmarks are stored with the connection profile and included in connection export. For saved profiles they are persisted field by field: add, edit and delete run against the latest bookmark list in the store, and the on-screen list changes only after the write succeeds. Operations that save the whole profile (editing the connection, the write-back after connecting, pinning, dragging between groups, trusting a certificate, and so on) always keep the stored bookmarks, so they can no longer clear or roll them back; only a Gist sync pull and a JSON backup import (overwriting an existing connection) replace the whole profile: a Gist payload that carries the bookmarks field (an empty list included) brings its bookmarks, while a payload pushed by an older version that has no such field at all keeps the local bookmarks (since 2026-10-24; before, they were cleared); a JSON backup import still takes the ones in the file; CSV cannot carry bookmarks, so an overwriting CSV import keeps the local ones. The explorer's “Duplicate Connection” takes the latest bookmarks from the store (including ones added in a document after the tree loaded). Opening a document first loads the latest bookmarks from the store, so bookmarks just added from another document show up. Temporary profiles created from recent connections are valid only for the current document. Remote + remote documents, access history, grouping, and shortcuts are not offered.
+    - Bookmarks are stored with the connection profile and included in connection export. For saved profiles they are persisted field by field: add, edit and delete run against the latest bookmark list in the store, and the on-screen list changes only after the write succeeds. Operations that save the whole profile (editing the connection, the write-back after connecting, pinning, dragging between groups, trusting a certificate, and so on) always keep the stored bookmarks, so they can no longer clear or roll them back; only a Gist sync pull and a JSON backup import (overwriting an existing connection) replace the whole profile: a Gist payload that carries the bookmarks field (an empty list included) brings its bookmarks, while a payload pushed by an older version that has no such field at all keeps the local bookmarks (since 2026-10-24; before, they were cleared); an overwriting JSON backup import follows the same rule: the file's bookmarks are taken only when it carries the bookmarks field (an empty list included), while a backup exported before directory bookmarks existed, without the field, keeps the local bookmarks (since 2026-10-25; before, they were cleared); CSV cannot carry bookmarks, so an overwriting CSV import keeps the local ones (as stored at that moment). The explorer's “Duplicate Connection” takes the latest bookmarks from the store (including ones added in a document after the tree loaded). Opening a document first loads the latest bookmarks from the store, so bookmarks just added from another document show up. Temporary profiles created from recent connections are valid only for the current document. Remote + remote documents, access history, grouping, and shortcuts are not offered.
     - The management window's add, edit and delete dialogs are owned by the management window itself (they work even when the document is not the active tab), and failures are shown in the window's bottom bar; the management window closes together with the document. Bookmark names and paths in the toolbar drop-down are shown literally, so `_` is no longer swallowed as an access key.
   - **Remote search** (since 2026-10-24, find / grep): only file panels of SSH sessions have it — the terminal side panel, the single-pane SFTP document, and the SSH pane of a dual-remote document; FTP and plugin protocols have no exec, so the entry points do not appear.
     - Entry points: `search` in the header, “Search remote files…” in the empty-area context menu (starting from the current directory), and “Search in this folder…” on a directory row (starting from that directory). One modeless “Search remote files” window per panel (760×560, minimum 560×380); when the panel goes away (tab closed, session disconnected) the window closes with it.
@@ -639,7 +658,13 @@ Save the current split panes and tabs as a named template and reopen the same se
     - Results arrive one by one; double-click, Enter or the row's “Show in the file pane” button: a directory is entered, a file has its directory opened and is selected and scrolled into view, a deleted one is not selected; a hidden dot file turns on “show hidden files” for that panel only, without writing it back to the settings.
     - At most 500 items and 2 minutes per search (fixed, not settings); hitting the limit or the time-out says plainly that the results are incomplete. “Stop” is always available, and closing the window stops it. Esc stops a running search first, and closes on the next press.
     - The remote login shell is checked first: bash, zsh, POSIX sh and fish can search; Windows cmd / PowerShell and csh-like shells get “not supported”, and when the shell cannot be determined (command execution disabled, SFTP-only account, time-out) it says so — in both cases **not a single command is sent**. User input is passed only as single-quoted positional parameters to a fixed script, never spliced into the command; searching from `/` skips `/proc`, `/sys` and `/dev`, and links are not followed.
-    - The status line reports each outcome on its own: N items found / limit reached, incomplete / timed out, incomplete / stopped / session disconnected / not a POSIX shell / shell could not be determined / no find on the server (searching by content also needs grep) / the failure text.
+    - **Session encoding** (since 2026-10-25): when the session encoding is not UTF-8 (e.g. GBK), results are shown in the session encoding and clicking one selects that row; the three inputs are encoded into the session encoding's bytes (octal escapes restored with `printf`, since the exec request itself can only be UTF-8),
+      and the whole search matches bytes in the C locale — musl systems such as Alpine match nothing at all for a non-UTF-8 pattern in a UTF-8 locale; the price is that `?` matches one byte rather than one Chinese character, and ignoring case works only for ASCII.
+      When the input has characters the session encoding cannot represent, that search is sent as UTF-8 as is (and most likely finds nothing).
+    - **Names containing a newline** (since 2026-10-25): each counts as one result instead of two. `find -exec … {} +` hands the paths to a small batch script that ends each record with `\0`; `tr` swaps newlines and `\0`, and `head` then counts records
+      (not `-print0`: BusyBox's `head` has no `-z` and its `grep` no `-Z`); names containing `\r` are shown as they are, too. On a very old BusyBox whose `find` lacks `-exec … +`, a probe detects it and the old line-based output is used
+      (newline names still split in two, and a content search finds nothing).
+    - The status line reports each outcome on its own: N items found / limit reached, incomplete / timed out, incomplete / stopped / session disconnected / not a POSIX shell / shell could not be determined / the server is missing find, head or tr (searching by content also needs grep) / the failure text.
   - Selected state `bg-hover`; multi-select (Ctrl/Shift) for batch operations.
   - Navigation uses “load first, commit later”: on failure, retain the original path, list, selection, and scroll position; after entering a new directory, clear the selection and return to the top.
   - Refreshing the current directory preserves selected items that still exist and the scroll position. Do not rebuild the list when content has not changed. For concurrent navigation, accept only the latest request result.
