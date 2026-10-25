@@ -1,6 +1,6 @@
 # 插件 SDK 参考
 
-> 适用版本:**SDK 2.0.2 / apiLevel 2**
+> 适用版本:**SDK 2.1.3 / apiLevel 2**
 > 相关文档(在别的仓库):[开发指南](../templates/dev-guide.md)(教程式) · [CLI 手册](../cli/cli.md) · [打包与发布](../templates/publishing.md)
 
 本篇是**面向查阅**的 SDK 全貌:包结构、契约表面、每个能力域能做什么/受什么限制、
@@ -154,9 +154,9 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 
 检查实际长度、传输前后远端元数据，并使用可用的摘要能力；不强制纯 SFTP 账号提供 exec，也不默认第二遍整文件下载。检测源变化则失败，但这些检查**不是远端原子快照保证**。提交用例在 Windows 与 Linux（WSL Debian 的 ext4 与 tmpfs）上实际跑过，macOS 只经 CI；这不是真实 SSH/GUI 整链验证。AI 生命周期与终态通知见 [自动化与 AI §1.7](../plugins/11-automation-and-ai.md#17-ai-双入口后台下载sdk-212)。
 
-### 3.3d 插件协议的文件能力补口（SDK TBD，发版时替换）
+### 3.3d 插件协议的文件能力补口（SDK 2.1.3）
 
-**此处是尚未发布的 SDK 契约，不代表宿主已经接上。** 契约已写进 velashell-plugin-sdk 的 dev，版本号由发布者决定；不修改版本横幅、不制作下游使用的本地包。正式包发布后，宿主中央依赖抬上去，再接 `PluginProtocolFileService`（链接字段、改修改时间、摘要）与 `RemoteFsCapability.Map`。全部只增不改，`apiLevel` 不变。
+**契约已随 SDK 2.1.3 正式发布到 NuGet.org，宿主尚未接上。** 宿主把中央依赖抬到 2.1.3 之后，再接 `PluginProtocolFileService`（链接字段、改修改时间、摘要）与 `RemoteFsCapability.Map`；在那之前宿主不读这几项。协议插件用到要声明 `minSdkVersion: 2.1.3`。全部只增不改，`apiLevel` 不变。
 
 - `RemoteFileEntry` 新增两个 `init` 属性（八参构造与 `Deconstruct` 不变）：`IsSymbolicLink` 按 lstat 判断；`IsDirectory`、`Size`、`LastModified` 描述链接**目标**，断链保留链接自身的属性；`LinkTarget` 是 readlink 的原文，可以是相对路径。隔离进程的 `fs/list`、`fs/stat` 现有 JSON 自动带上这两个字段，旧数据缺字段时读成「不是链接」。
 - `IProtocolLastWriteTime`（可选，与 `IProtocolStreamUpload` 一样由协议实现类兼实现）：`SetLastWriteTimeAsync(sessionId, path, DateTimeOffset lastWriteTime, ct)`。
@@ -164,14 +164,14 @@ DTO 与不透明 id),所以同一份插件源码在 `inProcess` 与 `isolated` �
 - 「不支持」怎么报：协议不实现这两个接口，宿主就如实报不支持；实现了但这条会话做不到（服务器没有 MFMT 或 HASH）时抛 `ProtocolUnsupportedException`。这两个接口只给 `inProcess` 的协议用（协议本来就只支持 `inProcess`），没有新增 RPC。
 - 范围外：插件协议上**创建**符号链接仍然没有契约，宿主的 `CreateSymbolicLinkAsync` 照旧报不支持。
 
-### 3.3e 传输启动前被拒（SDK TBD，发版时替换）
+### 3.3e 传输启动前被拒（SDK 2.1.3）
 
-**此处是尚未发布的 SDK 契约，宿主尚未改抛它。** 版本号由发布者决定，不修改版本横幅。
+**契约已随 SDK 2.1.3 正式发布到 NuGet.org，宿主尚未改抛它。**
 
 - `PluginTransferRejectedException`（派生自 `InvalidOperationException`，刻意不是 `IOException`；sealed）带 `Reason`（`RemoteTransferRejectReason`：`Unknown = 0`、`SourceNotFound`、`SourceInUse`、`QuotaExceeded`、`InsufficientSpace`）。RPC 错误码 `RpcErrorCodes.TransferRejected = "transfer-rejected"`，线上格式 `transfer-rejected:source-in-use`，不认识或缺失的后缀还原成 `Unknown`；`FromException` 里排在 `InvalidOperationException` 之前。
 - 宿主抛它就等于保证：任务没有登记、没有生成 transferId、没有读写任何内容、OperationId 也没有记进账本。条件变了之后可以再试（同一个 OperationId 不会撞上「参数不符」），但不要紧接着自动重试。
 - 与另外两种结局分开处理：「结果未知」只能用同一个 OperationId 去重取回执；「用户拒绝」（`PluginPermissionDeniedException`）重试没有意义。参数非法、平台不支持、会话不在、OperationId 参数冲突照旧用原来的异常类型。`IRemoteFsApi.StartUploadAsync` / `StartDownloadAsync` 补了 `<exception>` 说明。
-- 当前宿主（发版前）对这几种登记前的拒绝仍抛原来的类型（例如快照空间不够是 `Failed` / `insufficient-space` 的快照，§3.3b）。
+- 当前宿主（尚未改抛）对这几种登记前的拒绝仍抛原来的类型（例如快照空间不够是 `Failed` / `insufficient-space` 的快照，§3.3b）。
 
 ### 3.4 界面与扩展点
 
@@ -269,9 +269,9 @@ Icon = PluginIcon.Filled(RedisLogoPathData, viewBoxSize: 1030)
 > ⚠️ 与 `PanelTitleAction.IconPathData` **不是一回事**。那个画的是**窗口标题栏**上的动作按钮,
 > 恒为 24×24 描边,没有填充与视框可言(见[开发指南 §5.9](../templates/dev-guide.md))。
 
-### 3.7 往消息中心发通知（SDK TBD，发版时替换）
+### 3.7 往消息中心发通知（SDK 2.1.3）
 
-**此处是尚未发布的 SDK 契约，宿主尚未实现。** 契约已写进 velashell-plugin-sdk 的 dev，版本号由发布者决定，不修改版本横幅。正式包发布后，宿主再实现进程内 `PluginUiApi` 与隔离模式的 `ui/notify` 路由、限频、按插件静音、消息来源与卸载清理；在那之前 `SupportsNotifications` 为 false。
+**契约已随 SDK 2.1.3 正式发布到 NuGet.org，宿主尚未实现。** 宿主接下来实现进程内 `PluginUiApi` 与隔离模式的 `ui/notify` 路由、限频、按插件静音、消息来源与卸载清理；在那之前 `SupportsNotifications` 为 false。插件用到要声明 `minSdkVersion: 2.1.3`，调用前照样先看 `SupportsNotifications`。
 
 ```csharp
 if (ctx.Ui.SupportsNotifications)
@@ -293,12 +293,12 @@ if (ctx.Ui.SupportsNotifications)
 - `IUiApi.SupportsNotifications`（默认 false）与 `PostNotificationAsync(notification, ct)`（默认实现抛 `NotSupportedException`）都有默认实现，现有实现照旧能编译。返回 `PluginNotificationOutcome`：`Unknown = 0`、`Posted`、`AlreadyPosted`、`Muted`、`RateLimited`。
 - 约定：消息中心只收**要留存、可回看**的消息，进度、运行时状态、操作回执、调试信息不该往这里发（[消息中心与资讯源](../host/消息中心与资讯源.md) §1）。先去重、后限频：同一个 id 重投返回 `AlreadyPosted`，不算频率；每个插件每分钟最多 6 条新消息（宿主可以收得更紧），超出返回 `RateLimited`、不抛异常；用户按插件静音时返回 `Muted`。消息跨重启保留，受消息中心总量上限约束；插件卸载时宿主删掉它发的消息；插件不能改写或撤回已发的消息。动作命令最好写进清单的 `contributes.commands`，插件没激活时点击也能惰性激活。
 - 权限：不新增权限项 —— 普通权限 `ui.contributions` 本来就包含「通知（有频控）」（[06 §1](../plugins/06-permission-system.md)）；`notifications.system` 管的是操作系统通知，与这个无关。用户的控制手段在宿主侧：插件管理页的按插件静音。
-- 隔离进程：RPC `ui/notify`（`UiNotifyRequest` / `UiNotifyResponse`），握手 `HandshakeResponse.SupportsNotifications` 缺席时为 false（[IPC §7.4](../plugins/05-ipc-protocol.md)）。
+- 隔离进程：RPC `ui/notify`（`UiNotifyRequest` / `UiNotifyResponse`），握手 `HandshakeResponse.SupportsNotifications` 缺席时为 false（[IPC §7.4](../plugins/05-ipc-protocol.md#74-通知启动前被拒与整帧写入sdk-213)）。
 - 测试替身 `FakeUi`：`SupportsNotifications`（默认 true）、`NotificationRequests`（全部投递）、`PostedNotifications`（实际入列的）、`NotificationOutcome` 脚本（模拟限流与静音）、`PluginId`；校验与去重规则与宿主一致，`TestPluginContext` 把自己的 PluginId 同步给它。
 
-### 3.8 版本比较 `SemanticVersion`（SDK TBD，发版时替换）
+### 3.8 版本比较 `SemanticVersion`（SDK 2.1.3）
 
-**此处是尚未发布的 SDK 契约。** 宿主、CLI 与商店各自的版本比较会在包发布后改用它；在那之前各处照旧。
+**已随 SDK 2.1.3 正式发布到 NuGet.org。** 宿主、CLI 与商店各自的版本比较还没有改用它，眼下各处照旧；各自抬到 2.1.3 之后改用。
 
 - `VelaShell.PluginSdk.Versioning.SemanticVersion`（readonly struct）：`Major` / `Minor` / `Patch` / `Revision`（第四段，没有时为 0）、`PreRelease` / `BuildMetadata`（永不为 null）、`IsPreRelease`；`TryParse` / `Parse`（不合法抛 `FormatException`）。
 - `CompareTo` 按完整的 SemVer 2.0 §11 优先级：`beta.2 < beta.10`，纯数字标识符按长度再按序数比、任意长度不溢出，纯数字低于含字母的，含字母的按 ASCII 序数、区分大小写，前面都相同时标识符多的更高；构建元数据保留但不参与比较（`Equals` / `GetHashCode` 同一口径）。
@@ -342,6 +342,7 @@ if (ctx.Ui.SupportsNotifications)
 | **2.1.0** | `StreamSudoAsync`、sudo 非敏感事件/结果与专用测试替身；执行操作握手、取消及有序完整通知。已正式发布，见 §3.3a。 | 用到就要（`2.1.0`）；AI 清单已声明 |
 | **2.1.1** | 独立上传任务：`SupportsTransferOperations`、`StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`、`RemoteTransferSnapshot` 与 `fs/transfer/*` RPC。已正式发布，见 §3.3b。 | 用到就要（`2.1.1`） |
 | **2.1.2** | 独立下载任务：`SupportsDownloadOperations`、`StartDownloadAsync` / `RemoteDownloadOptions`，快照加 `Direction` / `Phase`，`fs/transfer/startDownload` RPC。已正式发布，见 §3.3c。 | 用到就要（`2.1.2`）；AI 清单已声明 |
+| **2.1.3** | 插件协议的文件能力补口：`RemoteFileEntry.IsSymbolicLink` / `LinkTarget`、`IProtocolLastWriteTime`、`IProtocolChecksum` 与 `RemoteChecksumAlgorithm`（§3.3d）；传输启动前被拒 `PluginTransferRejectedException` 与 `transfer-rejected` 错误码（§3.3e）；往消息中心发通知 `IUiApi.PostNotificationAsync` 与 `ui/notify`（§3.7）；版本比较 `SemanticVersion`（§3.8）；`RpcConnection` 一帧要么整帧写完、要么不开始（[IPC §7.4](../plugins/05-ipc-protocol.md#74-通知启动前被拒与整帧写入sdk-213)）。已正式发布，宿主尚未接。只增不改，`apiLevel` 不变。 | 用到就要（`2.1.3`）；整帧写入的修正不涉及插件代码，抬包即生效 |
 
 ### 2.0 迁移
 
@@ -386,7 +387,7 @@ public async Task Activate_RegistersCommand()
 
 可用替身:`CollectingLogger`、`InMemoryStorage`、`InMemoryTimeSeries`、`FakeSessions`、
 `FakeRemoteFs`、`FakeRemoteExec`、`FakeRemoteTunnel`、`FakeTerminal`、`FakeTerminalViewApi`、
-`FakeUi`（SDK TBD 起另有通知成员，见 §3.7）、`FakeSecrets`、`FakeClipboard`、`RecordingCommands`、`RecordingProtocols`、
+`FakeUi`（SDK 2.1.3 起另有通知成员，见 §3.7）、`FakeSecrets`、`FakeClipboard`、`RecordingCommands`、`RecordingProtocols`、
 `RecordingWorkspaces`、`TestHostEvents`、`TestHostInfo`。
 
 `FakeSessions` 除了 `AddConnected` 还有 `AddSaved`(造一条已保存配置)与三个钩子:

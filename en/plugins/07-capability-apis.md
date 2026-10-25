@@ -46,7 +46,7 @@ Host-side protections: a per-plugin limit on concurrent SFTP operations (4 by de
 
 ### 2.1 Independent upload jobs (SDK 2.1.1)
 
-`IRemoteFsApi` adds `SupportsTransferOperations` and `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`; see [SDK §3.3b](../sdk/sdk-reference.md#33b-independent-upload-jobs-sdk-211) for the complete contract. Unlike synchronous transfers above, start returns a snapshot while the host continues streaming content. A query/wait deadline does not cancel the transfer, and the legacy two-hour RPC limit is not an execution deadline. Refusals made before a job is registered (source missing, in use, quota full, not enough space) will come back as `PluginTransferRejectedException` (SDK TBD, unpublished, the host does not throw it yet; see [SDK §3.3e](../sdk/sdk-reference.md)). Plugin protocols get the optional `IProtocolLastWriteTime` (setting modification times) and `IProtocolChecksum` (server-provided digests only, `RemoteChecksumAlgorithm`) and `RemoteFileEntry.IsSymbolicLink` / `LinkTarget` in the same unpublished SDK version ([SDK §3.3d](../sdk/sdk-reference.md)).
+`IRemoteFsApi` adds `SupportsTransferOperations` and `StartUploadAsync` / `GetTransferAsync` / `WaitTransferAsync` / `CancelTransferAsync` / `ResumeTransferAsync`; see [SDK §3.3b](../sdk/sdk-reference.md#33b-independent-upload-jobs-sdk-211) for the complete contract. Unlike synchronous transfers above, start returns a snapshot while the host continues streaming content. A query/wait deadline does not cancel the transfer, and the legacy two-hour RPC limit is not an execution deadline. Refusals made before a job is registered (source missing, in use, quota full, not enough space) will come back as `PluginTransferRejectedException` (contract published in SDK 2.1.3, the host does not throw it yet; see [SDK §3.3e](../sdk/sdk-reference.md#33e-transfers-refused-before-they-start-sdk-213)). Plugin protocols get the optional `IProtocolLastWriteTime` (setting modification times) and `IProtocolChecksum` (server-provided digests only, `RemoteChecksumAlgorithm`) and `RemoteFileEntry.IsSymbolicLink` / `LinkTarget` in the same SDK 2.1.3, not yet wired in the host ([SDK §3.3d](../sdk/sdk-reference.md#33d-file-capabilities-for-plugin-protocols-sdk-213)).
 
 The current host permits four concurrent transfers shared by uploads and downloads and 32 active/queued jobs per plugin, retaining up to 1024 lifetime idempotency receipts. Quota exhaustion rejects new jobs; reacquiring an existing id is not blocked by the active-job quota. These are resource/concurrency budgets, not file-size limits.
 
@@ -146,9 +146,9 @@ public interface IPluginSettings   // Permission: settings.own (normal)
 
 Permission: `ui.contributions` (normal). Includes commands/menu items/status-bar dynamic updates, VelaUI surfaces (panels and document pages), dialogs (Message/Confirm/Input/QuickPick), in-app notifications (rate limit: ≤6 per plugin per minute), and progress indicators (in the status bar or notifications).
 
-> The actual contract for in-app notifications (SDK TBD, unpublished, not yet wired in the host): `IUiApi.SupportsNotifications` / `PostNotificationAsync(PluginNotification)`,
+> The actual contract for in-app notifications (SDK 2.1.3, not yet wired in the host): `IUiApi.SupportsNotifications` / `PostNotificationAsync(PluginNotification)`,
 > returning `Posted` / `AlreadyPosted` / `Muted` / `RateLimited`; de-duplicated by id before rate limiting (6 per plugin per minute), only for messages worth keeping and reading again,
-> with actions limited to the plugin's own commands and no URL field. See [SDK §3.7](../sdk/sdk-reference.md).
+> with actions limited to the plugin's own commands and no URL field. See [SDK §3.7](../sdk/sdk-reference.md#37-posting-to-the-message-center-sdk-213).
 
 ## 8. vela.events, Host Event Subscriptions (S5)
 

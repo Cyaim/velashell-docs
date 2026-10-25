@@ -90,7 +90,7 @@ dotnet build -c Release -t:PackVpx               # → bin/vpx/acme.snippets-0.1
 生成的 `.csproj` 只有一行依赖:
 
 ```xml
-<PackageReference Include="VelaShell.PluginSdk.Build" Version="2.0.9" />
+<PackageReference Include="VelaShell.PluginSdk.Build" Version="2.1.4" />
 ```
 
 这一个包把插件工程需要的东西一并带到:契约程序集 `VelaShell.PluginSdk`、**与宿主版本
