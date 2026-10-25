@@ -86,7 +86,7 @@ public interface IRemoteFs
 
 普通与 sudo 流共享每插件 4 条流上限，接收器应同步快速转发，不用 `Progress<T>` 打乱输出顺序。接收器慢了不会中断执行，只会让远端输出跟着慢下来：隔离插件的通知队列满时宿主等它腾出位置，背压经 SSH 窗口传回远端；进程内插件本就在读行线程上同步回调。普通流无换行长输出按最多 4096 字符分片，CR 可分段，超长行带 `[VelaShell: continued]`，因此不要依赖一条回调等于一条完整应用记录。sudo 输出与普通流一样把非 UTF-8 字节替换为 U+FFFD，GBK 日志、二进制内容或非 UTF-8 文件名不会让在跑的 root 命令变成 Unknown。
 
-**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传/下载 API 提供各自专用单任务租约（§2.1/§2.2），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。
+**权限现状与设计目标分开。** 本蓝图的 `remote.exec` Broker、通用 Demand 与不可关闭审计是设计目标，不能当作本次已实现的保证；当前 `PluginPermissionGate` 覆盖 `terminal.write` / `session.open`，并为新上传/下载 API 提供各自专用单任务租约（§2.1/§2.2），不是其它远程文件操作的通用许可。此次 sudo 新增的是**宿主逐次可信确认**，而非整套通用权限系统。来源插件从宿主清单绑定，真实目标来自连接；即使 NOPASSWD 也不能跳过确认。确认框弹出后「批准」先灰约 0.6 秒（从窗口打开起算，2026-10-25 起），取消随时可点，回车与初始焦点仍在取消上 —— 防的是用户正打字时顺手一个回车批掉 root 命令。
 
 AI 插件的提权审批与宿主确认是两层：`Ask` / `ReadOnlyAuto` 使用独立 `run_command_elevated` 类型、展示目标及整条 root 范围且不设 RepeatKey；缺少审批 Handler 即拒绝，root `cat` 也不能按只读自动放行。用户明确选择 `Bypass` 只跳过插件审批，绝不跳过宿主确认。MCP 无 Handler 时前两模式拒绝，Bypass 可以请求桌面宿主确认。
 

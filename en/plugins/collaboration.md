@@ -137,6 +137,15 @@ These are deliberate, not accidents of the default values:
   long connection); text is the one channel that is solid on all four.
 - **Approvers can be configured separately from "who may talk"**: anyone on duty may ask, but
   restarting a service needs the person in charge to say yes.
+- **Approvals of external MCP tools follow the round that started them** (that chat's approval callback and mode, since 2026-10-25):
+  with several chats running at once each asks for itself — an approval card never lands in another group, and another chat being on
+  "auto approve all" no longer skips the question.
+- **Stopping or denying withdraws queued transfers**: after `/stop`, a round time-out, or any denial in the round (answering `n`, Deny in the
+  desktop host's confirmation, a cancelled root authentication), uploads / downloads of that round still waiting for desktop confirmation are
+  withdrawn too (ending Cancelled, nothing written); approved ones finish as usual, and a round that ends normally withdraws nothing.
+- **Truncated answers are still sent**: an answer with text that was cut by the output limit or a content filter, or ended by a model refusal,
+  is sent as usual with a note appended, with no error and no relay switch; when the tools have all run and the model still says nothing after
+  being asked to continue, the bot replies with an explanation, again without reporting a failure. An answer with no text at all still fails.
 
 ### 1.5 WeCom: why it needs one more step
 
@@ -187,11 +196,18 @@ this. HTTP only asks the user to paste one address into their agent's configurat
   Listening on loopback is not the same as being safe — any process on this machine, including a
   page in the browser, can post to a local port, and the token is the only door. The settings page
   can regenerate it at any time (remember to update your agent's configuration afterwards).
-- **The default mode is read-only.** Usable out of the box is not the same as writable out of the box.
+- **The default mode is read-only.** Usable out of the box is not the same as writable out of the box. In "Chat" mode **no tools at all** are offered (`tools/list` is empty, without even `use_session`, and the initialize instructions suggest switching to Plan or Agent; since 2026-10-25 — before, it registered every tool like Agent).
 - **There is no approval UI on this route** — an external agent runs in another process, so VelaShell
   cannot show it an approval card. "Ask every time" therefore **refuses every write** here. To let it
   change things you must explicitly pick "read-only auto" or "bypass": a visible choice rather than a
   quiet default.
+- **"Read-only auto" lets through only `run_command`s whose shape is known not to change anything** (tightened on 2026-10-25): `sudo` always asks and
+  `env` is not on the list; `curl` / `wget` are allowed only for fetching an explicit http(s) URL to standard output (writing files, uploads,
+  non-GET requests such as POST, custom headers, reading config files and non-http(s) protocols all ask); `ip` / `route` / `ifconfig` / `mount` /
+  `hostname` / `date` / `dmesg` / `journalctl` and the like ask when given state-changing arguments, and so do their arguments containing quotes,
+  backslashes, `$`, wildcards or braces; opening a connection is never among them.
+- External MCP offers no `web_search` / `web_fetch`: web search is off by default, and this route does not read that switch in the AI settings
+  (see [Automation and AI](11-automation-and-ai.md) §1.4a).
 - "Allowed servers" restricts the external agent to a named set of machines (see below).
 
 This one is **on by default**: loopback-only plus a mandatory token plus a read-only default mode is
@@ -202,7 +218,7 @@ page before an agent can be connected.
 
 `upload_local_file` reads a file from **the machine running VelaShell**, not the external model's machine. Supply an absolute path on that machine for local MCP output. There is no longer a 32 MiB upload cap: an independent job quickly returns `transfer_id` and structured progress. External agents use `transfer_status` or `transfer_wait` (up to 30 seconds) for state, transferred/total bytes, speed and ETA. Wait expiry does not cancel the upload, and an MCP request deadline is not the background transfer's execution deadline.
 
-The server does not wake an external model. Running is not success: verification and commit may continue after all bytes are transferred, and only `Succeeded` means complete. `transfer_cancel` uses the expected generation from the snapshot; accepting cancellation does not confirm remote termination. Never replay `Unknown` automatically; `transfer_resume` is available only when the host confirms safe recovery. Uploads preserve existing destinations by default; explicit overwrite still follows the configured write-approval mode. Every new upload also requires trusted desktop-host confirmation of the specific source/destination and overwrite policy, approving only that job. `Bypass` cannot skip it; missing prompt or desktop window means rejection. Plugin management can revoke upload leases, requesting cancellation without promising rollback of already committed files. IM platform file limits and chat attachments are unchanged; the next section covers new download behavior. See [Automation and AI §1.6](11-automation-and-ai.md#16-ai-file-uploads-and-progress-sdk-211) for the full tool contract.
+The server does not wake an external model. Running is not success: verification and commit may continue after all bytes are transferred, and only `Succeeded` means complete. `transfer_cancel` uses the expected generation from the snapshot; accepting cancellation does not confirm remote termination. Never replay `Unknown` automatically; `transfer_resume` is available only when the host confirms safe recovery. Uploads preserve existing destinations by default; explicit overwrite still follows the configured write-approval mode. A single denial on this connection fails only that call and does not withdraw other queued transfers on it (denials on the IM route do, see 1.4). Every new upload also requires trusted desktop-host confirmation of the specific source/destination and overwrite policy, approving only that job. `Bypass` cannot skip it; missing prompt or desktop window means rejection. Plugin management can revoke upload leases, requesting cancellation without promising rollback of already committed files. IM platform file limits and chat attachments are unchanged; the next section covers new download behavior. See [Automation and AI §1.6](11-automation-and-ai.md#16-ai-file-uploads-and-progress-sdk-211) for the full tool contract.
 
 ### 2.3b Background downloads and explicit queries (SDK 2.1.2)
 
@@ -326,5 +342,7 @@ people press blind.
 Switching models or signing in again **does not require restarting the bridge** — the AI settings are
 re-read every turn, so the next message picks them up. "Fetch models" in the AI settings never prunes the
 bridge's model, the active selection or any model in the failover chain, even if a relay's list
-temporarily leaves one out. Only channel credentials and allowlists need a
+temporarily leaves one out. If the model the bridge is pinned to has been deleted, the bot replies “The model this bridge is pinned to has been
+removed from VelaShell. Pick another one in AI collaboration settings — the bridge does not switch to a different model on its own.” and sends no
+request, instead of falling back to the first model overall (since 2026-10-25); a bridge that follows the chat panel is unchanged. Only channel credentials and allowlists need a
 save on the settings page (which restarts the channels with the new configuration).

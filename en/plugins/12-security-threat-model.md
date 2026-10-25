@@ -42,7 +42,7 @@ SDK 2.1.0 is officially published and used by the host/AI. Execution RPC, Capabi
 
 | # | Threat | Mitigation | Status |
 | --- | --- | --- | --- |
-| T01 | A malicious plugin impersonates another plugin in an update (supply chain) | Same public key required for upgrades of the same id; key changes require official-source endorsement; revocation list | v1 |
+| T01 | A malicious plugin impersonates another plugin in an update (supply chain) | Same public key required for upgrades of the same id; key changes require official-source endorsement; revocation list; in-app updates use https only, the marketplace must give the package's `fileSha256`, checked after download (2026-10-25) | v1 |
 | T02 | Path traversal inside a package (zip-slip) writes arbitrary files | Extractor allowlist validation; reject `..`, absolute paths, and symbolic links | v1 |
 | T03 | Another local process impersonates a plugin connecting to the host channel | Random pipe name + one-time token + pipe ACL (user SID)/socket 0600 | v1 |
 | T04 | A plugin impersonates another plugin when making calls | Identity-bound connection; protocol has no identity parameter (05 §4) | v1 |
