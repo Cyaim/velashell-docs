@@ -903,7 +903,8 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
   **插件没有一行连接对话框的界面代码。**
 - **「测试」按钮走插件自己的路**:插件连接的握手不是 SSH,宿主不会拿 SSH 去撞你的端口。
   它按声明分流 —— 工作台形态真开一次 `OpenAsync` 再立刻 `DisposeAsync`(隧道一并建好又拆掉),
-  文件系统形态开一次会话再关掉。所以 `OpenAsync` **必须能被反复调用且不留副作用**;
+  文件系统形态开一次会话再关掉。所以 `OpenAsync` **必须能被反复调用、无视图即可释放且不泄漏本地资源**;
+  真实握手可能改变远端状态（如 RDP 创建/附加登录会话），不要承诺远端无副作用。
   抛出的异常消息会原样出现在对话框里,写得让用户能照着改配置。
 - **声明式 SSH 隧道**:连接类型声明 `WorkspaceFeatures.SshTunnel`、并给一个
   `ProtocolSettingKind.SshSession` 形态的字段,宿主就会在打开会话**之前**建好 SSH 会话
@@ -946,6 +947,35 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 
 完整示例:[`plugins/VelaShell.Plugin.Redis`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Redis)(键空间浏览器 + 类型详情 + 声明式连接表单)。
 最快的起点:`dotnet new velaplugin-workspace`(见 §2.4,默认带一个经 SSH 隧道的字段,不需要就按注释删掉)。
+
+#### 5.14.1 RDP 内嵌桌面实例与边界
+
+第一方 [`VelaShell.Plugin.Rdp`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Rdp)
+注册 `velashell.rdp`（`inProcess` / `onWorkspace:velashell.rdp`，默认 3389）。
+在连接配置选择 RDP，复用宿主主机、端口和账号密码字段；`domain` 可单独填写，或使用 `DOMAIN\user`，
+UPN（`user@domain`）须将域留空。本地账户使用 Windows 计算机名；`.` 域互操作未验证，不猜测 FQDN 对应的 NetBIOS 名。
+高级字段为初始宽高（默认 1280×720，宽 320–7680、高 200–4320）、本地缩放（适应窗口/1:1）与连接超时（1000–120000ms，默认 15000ms）。
+`jumpSession` 复用上述宿主 SSH 隧道；传输连本地转发端点，但 TLS/NLA 仍校验 `Tunnel.TargetHost` 的真实身份。
+
+- 依赖正式 NuGet `Devolutions.IronRdp 2026.10.19` 托管桥与六个桌面原生 RID（Windows/macOS/Linux × x64/arm64），
+  随插件分发；SDK/Avalonia/MicroCom.Runtime 不复制。对应官方提交的 MIT/Apache 文本与第三方 NOTICE 在包内 `Licenses/`，
+  来源记录明确核实范围，不宣称静态 Rust 依赖已全面法律审核。
+- 仅使用 TLS + NLA/CredSSP，不接受明文 legacy RDP 或静默安全降级，不自动跟随服务器重定向。
+  目前 NLA 仅支持密码 NTLM；域/UPN 语法不代表 Kerberos、SSO 或智能卡支持。
+  插件为进程内运行，第三方原生解码异常与内部内存峰值不完全受托管预算约束，不提供崩溃隔离。
+  系统证书校验有效且未 pin 时接受；显式 pin 必须匹配 SHA-256，证书变化必须重新确认。
+  初次打开经宿主信任提示；标签页重连不提供该提示，需关闭后从连接配置重新打开核实，不偷偷更新 pin。
+- `OpenAsync` 返回前完成桌面激活；Open→Dispose 不要求创建 Avalonia 视图。
+  「测试」会真实握手登录后断开，可能创建/附加远程 Windows 会话；断开不是注销，不能保证远端无副作用。
+  显式断开/重连、关闭、插件停用与宿主 shutdown 都要取消并收尾；旧代帧/事件不得更新新会话。
+- 凭据仅以最小会话内存副本供当前连接和显式重连，不保留整个含口令请求，不写普通 Storage、日志、环境变量或 UI 模型。
+  能清零的缓冲在释放时清零，但不可变托管字符串及第三方 native 副本不能保证可靠擦除。
+- 首版不含剪贴板、音频、磁盘/打印机重定向、RD Gateway、RemoteApp、多显示器、远端动态分辨率及 IME/Unicode 输入。
+  本地缩放不改变远端分辨率。宿主/操作系统保留键优先（包括宿主默认 Ctrl+N/W/Tab 等），可在宿主设置改键/解绑；
+  Ctrl+Alt+Del 使用按钮发送，不宣称全部组合已捕获。切换语言复用 provider，并热更新已打开文档。
+- 首次连接的证书确认框已由用户在调试中确认可见；这不代表登录或完整桌面整链已验收。
+  真实 Windows 登录、画面/键鼠及断网重连，以及 macOS/Linux 与 arm64 实机运行仍未验收。
+  六 RID 文件存在仅是包资产检查，不能冒充这些平台运行通过。
 
 ## 6. 隔离进程模式(isolated)
 

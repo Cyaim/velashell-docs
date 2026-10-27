@@ -731,8 +731,10 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
   mode are declared with `VisibleWhen` (see §5.13). **The plugin has no connection-dialog UI code at all.**
 - **The "Test" button takes the plugin's own path**: the plugin's handshake is not SSH, and the host will not throw SSH at your port. It
   branches by declaration — the workspace shape really opens once with `OpenAsync` and immediately calls `DisposeAsync` (building and
-  tearing down the tunnel with it), the file-system shape opens a session and closes it. So `OpenAsync` **must be callable repeatedly with no
-  side effects**; the message of an exception it throws appears verbatim in the dialog, so write it so the user can fix the profile from it.
+  tearing down the tunnel with it), the file-system shape opens a session and closes it. So `OpenAsync` **must be callable repeatedly,
+  disposable without a view and free of local resource leaks**. A real handshake may change remote state (for example, RDP creates or
+  attaches a login session); do not promise no remote side effects. The message of an exception appears verbatim in the dialog, so write
+  it so the user can fix the profile from it.
 - **Declarative SSH tunnels**: declare `WorkspaceFeatures.SshTunnel` on the connection type and give it a field of shape
   `ProtocolSettingKind.SshSession`, and the host builds the SSH session and the local port forward **before** opening the session, handing
   the rewritten local endpoint to `OpenAsync` (the real target is in `WorkspaceConnectRequest.Tunnel`, for showing where it comes from); the
@@ -779,6 +781,43 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 Complete example: [`plugins/VelaShell.Plugin.Redis`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Redis) (keyspace browser + type details + declarative connection form).
 Quickest start: `dotnet new velaplugin-workspace` (see §2.4; it comes with a field for going through an SSH tunnel — delete it by following
 the comments if you do not need it).
+
+#### 5.14.1 Embedded RDP desktop example and boundaries
+
+The first-party [`VelaShell.Plugin.Rdp`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Rdp)
+registers `velashell.rdp` (`inProcess` / `onWorkspace:velashell.rdp`, port 3389 by default).
+Select RDP in the connection profile and reuse the host's endpoint and username/password fields. Set `domain` separately or use
+`DOMAIN\user`; UPN (`user@domain`) requires an empty domain. For local accounts use the Windows computer name;
+`.` domain interoperability is not verified, and an FQDN is not guessed into a NetBIOS name.
+Advanced fields are initial width/height (1280×720 by default; width 320–7680, height 200–4320), local scaling (fit/1:1), and
+connect timeout (1000–120000ms, default 15000ms). `jumpSession` reuses the host SSH tunnel above: transport connects to the local
+forwarding endpoint while TLS/NLA verifies the real `Tunnel.TargetHost` identity.
+
+- Depends on the official NuGet `Devolutions.IronRdp 2026.10.19` managed bridge and six desktop native RIDs
+  (Windows/macOS/Linux × x64/arm64), shipped with the plugin; SDK/Avalonia/MicroCom.Runtime are not copied.
+  `Licenses/` preserves MIT/Apache texts and the third-party NOTICE from the corresponding official commit, with a source record
+  delimiting the checked scope; this is not a claim of an exhaustive legal audit of statically linked Rust dependencies.
+- Uses TLS + NLA/CredSSP only: no plaintext legacy RDP, silent security downgrade, or automatic server redirection.
+  NLA currently supports password-based NTLM only; domain/UPN syntax does not imply Kerberos, SSO or smart-card support.
+  The plugin runs in-process: third-party native decoder failures and internal memory peaks are not fully constrained by
+  managed budgets, and crash isolation is not provided.
+  Valid system certificate verification is accepted without a pin; an explicit pin must match SHA-256, and a changed certificate
+  requires confirmation again. Initial open uses the host trust prompt; tab reconnection does not provide that prompt, so close
+  and reopen the saved profile to verify it. The plugin never silently updates the pin.
+- `OpenAsync` completes desktop activation before returning; Open→Dispose does not require creating an Avalonia view.
+  "Test" really logs in and disconnects, potentially creating/attaching a remote Windows session. Disconnect is not logoff and
+  cannot guarantee no remote side effects. Explicit disconnect/reconnect, close, deactivation and host shutdown must cancel and
+  clean up; old-generation frames/events must not update a new session.
+- Credentials are kept only as a minimal in-memory session copy for this connection and explicit reconnection, not as the whole
+  password-bearing request, and never in ordinary Storage, logs, environment variables or UI models. Controllable buffers are cleared
+  on disposal, but immutable managed strings and third-party native copies cannot be guaranteed to be reliably erased.
+- The first version does not include clipboard, audio, drive/printer redirection, RD Gateway, RemoteApp, multiple monitors,
+  dynamic remote resolution or IME/Unicode input. Local scaling does not resize the remote desktop. Host/OS-reserved shortcuts
+  take precedence (including host defaults such as Ctrl+N/W/Tab); rebind/unbind host shortcuts in Settings if needed. Send Ctrl+Alt+Del
+  with the button; do not assume every combination is captured. Locale changes reuse the provider and update already-open documents.
+- The user has confirmed that the initial certificate trust dialog appears while debugging; this does not establish successful
+  login or end-to-end desktop interoperability. Real Windows login, display/input and network-loss/reconnect, plus macOS/Linux
+  and arm64 execution, remain unverified. Six RID files in a package are asset checks, not evidence of successful execution on those platforms.
 
 ## 6. Isolated Process Mode (`isolated`)
 
