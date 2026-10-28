@@ -808,6 +808,15 @@ forwarding endpoint while TLS/NLA verifies the real `Tunnel.TargetHost` identity
   "Test" really logs in and disconnects, potentially creating/attaching a remote Windows session. Disconnect is not logoff and
   cannot guarantee no remote side effects. Explicit disconnect/reconnect, close, deactivation and host shutdown must cancel and
   clean up; old-generation frames/events must not update a new session.
+  Natural pump termination also releases the decoder, stream and managed double buffers without waiting for the faulted tab to close;
+  the UI retains only its last successfully displayed bitmap.
+- The UI copies directly into a locked bitmap under a synchronous frame lease, without another full-frame staging array;
+  target dimensions, stride and capacity are validated before writing. Pixel-only updates do not refresh the toolbar or request layout.
+  Without a created/attached view, protocol decoding continues but managed snapshots are skipped; reattaching requests the latest complete image.
+  Snapshots coalesce at finite processing-turn boundaries, control wakeups do not occupy the input queue, and continuously ready network/input work alternates fairly.
+  Native→managed and managed→bitmap copies remain: this is not zero-copy. The current binding does not enable modern bitmap codecs / RDPGFX;
+  host GPU composition does not imply RDP video hardware decoding. The frame-size limit is not a process-wide or multi-session memory cap.
+  Synthetic copy throughput and publication sequence numbers are not screen FPS; stable 60/120 FPS still requires end-to-end validation.
 - Credentials are kept only as a minimal in-memory session copy for this connection and explicit reconnection, not as the whole
   password-bearing request, and never in ordinary Storage, logs, environment variables or UI models. Controllable buffers are cleared
   on disposal, but immutable managed strings and third-party native copies cannot be guaranteed to be reliably erased.
