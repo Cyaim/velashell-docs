@@ -12,6 +12,10 @@
 > the FTP tab and FTPS form in the connection dialog, the certificate-fingerprint trust flow, and importer conversion of FTP/FTPS to supported types.
 > **The only remaining item to validate is Risk 1 in Section 5 (TLS session reuse)**: run one real connectivity test each against vsftpd and FileZilla Server using their default configurations.
 > It determines whether the LGPL-licensed `FluentFTP.GnuTLS` must be introduced. The rest of this document remains unchanged as a record of the design tradeoffs.
+>
+> **Current behavior revision (2026-10-30)**: Each FTP/FTPS session uses exactly one control connection; uploads, downloads, and metadata operations queue on it.
+> The legacy `MaxConnections` field remains for compatibility but no longer raises the actual connection count; the global concurrent-transfer limit does not open multiple clients for the same FTP session either.
+> This compatibility tradeoff accommodates servers that do not support concurrent transfers from multiple clients and supersedes the multi-connection recommendations in Sections 1, 3.2, and Risk 2 in Section 5 below. SFTP concurrency is unchanged.
 
 ---
 
