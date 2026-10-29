@@ -955,6 +955,7 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 在连接配置选择 RDP，复用宿主主机、端口和账号密码字段；`domain` 可单独填写，或使用 `DOMAIN\user`，
 UPN（`user@domain`）须将域留空。本地账户使用 Windows 计算机名；`.` 域互操作未验证，不猜测 FQDN 对应的 NetBIOS 名。
 高级字段为初始宽高（默认 1280×720，宽 320–7680、高 200–4320）、本地缩放（适应窗口/1:1）与连接超时（1000–120000ms，默认 15000ms）。
+另有 `redirectClipboard=false`、`redirectDrives=""`（例如 `D:\;E:\`）和 `drivesReadOnly=true`；启用即允许所选远端交换文本或访问所选整个逻辑卷，并非仅某个目录。
 `jumpSession` 复用上述宿主 SSH 隧道；传输连本地转发端点，但 TLS/NLA 仍校验 `Tunnel.TargetHost` 的真实身份。
 
 - 依赖正式 NuGet `Devolutions.IronRdp 2026.10.19` 托管桥与六个桌面原生 RID（Windows/macOS/Linux × x64/arm64），
@@ -976,8 +977,16 @@ UPN（`user@domain`）须将域留空。本地账户使用 Windows 计算机名�
   单帧尺寸限制不是进程/多会话总内存上限；synthetic 复制吞吐或发布序列号不能冒充真实屏幕 FPS，稳定 60/120 FPS 仍需端到端验证。
 - 凭据仅以最小会话内存副本供当前连接和显式重连，不保留整个含口令请求，不写普通 Storage、日志、环境变量或 UI 模型。
   能清零的缓冲在释放时清零，但不可变托管字符串及第三方 native 副本不能保证可靠擦除。
-- 首版不含剪贴板、音频、磁盘/打印机重定向、RD Gateway、RemoteApp、多显示器、远端动态分辨率及 IME/Unicode 输入。
-  本地缩放不改变远端分辨率。宿主/操作系统保留键优先（包括宿主默认 Ctrl+N/W/Tab 等），可在宿主设置改键/解绑；
+- 首版不含音频、打印机重定向、RD Gateway、RemoteApp、多显示器、远端动态分辨率及 IME/Unicode 输入；剪贴板与磁盘重定向已实现 Windows x64 测试路径，但仍需真实远端验收。
+  配置默认关闭文本剪贴板与磁盘映射；磁盘仅接受完整逻辑盘根（如 `D:\`），默认只读，不支持文件夹、UNC 或动态热插拔。
+  文本只在远程桌面焦点有效，Ctrl+V 的按键发送等待本地公告 ACK；失焦、窗口停用、断线和旧代回调均被隔离。图片和文件剪贴板不支持。
+  2026-10-29 已添加独立 MS-RDPECLIP Unicode 文本编解码与传输无关状态机（文本载荷 ≤2 MiB、控制/格式列表 ≤64 KiB、格式 ≤1024、出站 FIFO ≤12 条）。
+  状态机等待服务器 MONITOR_READY、兼容旧服务器短格式名，公告按 ACK 合并；旧响应排空前不发新请求，溢出显式故障，禁用清零队列。
+  文本直接编码到最终包，避免第二份完整载荷。托管回归 152/152 通过（不含手动性能分类），含设置、编解码/状态机、原生 ABI、失焦和重复文本 Ctrl+V 用例；原生静态通道 10/10 通过，覆盖 16 MiB 分片重组上限。托管严格非增量构建零警告/错误。
+  固定 IronRDP 提交 `1f69e124e6bf85608efce3495c12eaf5f6b5a95d` 的 Windows x64 Release 原生扩展可从插件 `native/Build-Native.ps1` 在新临时目录重建；上游保留一条 `unfulfilled_lint_expectations` 警告。
+  托管桥仍来自正式 NuGet；`native/artifacts` 不入库，缺少扩展时恢复原始库且启用重定向明确失败。其他五个 RID 当前仍使用 NuGet 原始库，不具备这些新增扩展。
+  本地 Release 测试库 SHA-256 为 `100EC7E145C4CEFD77D5311B972248BC5C28D351954B751EFDB2DADABBBA8B64`，不代表真实远端登录、磁盘 I/O 或剪贴板互操作已经验收。
+  本地缩放不改变远端分辨率；宿主/操作系统保留快捷键优先，可在宿主设置中改键或解绑。
   Ctrl+Alt+Del 使用按钮发送，不宣称全部组合已捕获。切换语言复用 provider，并热更新已打开文档。
 - 首次连接的证书确认框已由用户在调试中确认可见；这不代表登录或完整桌面整链已验收。
   真实 Windows 登录、画面/键鼠及断网重连，以及 macOS/Linux 与 arm64 实机运行仍未验收。

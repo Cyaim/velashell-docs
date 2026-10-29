@@ -792,6 +792,8 @@ Select RDP in the connection profile and reuse the host's endpoint and username/
 Advanced fields are initial width/height (1280×720 by default; width 320–7680, height 200–4320), local scaling (fit/1:1), and
 connect timeout (1000–120000ms, default 15000ms). `jumpSession` reuses the host SSH tunnel above: transport connects to the local
 forwarding endpoint while TLS/NLA verifies the real `Tunnel.TargetHost` identity.
+Additional advanced settings are `redirectClipboard=false`, `redirectDrives=""` (for example `D:\;E:\`) and `drivesReadOnly=true`.
+Enabling these authorizes text exchange or access to the entire selected logical volume, not just a directory.
 
 - Depends on the official NuGet `Devolutions.IronRdp 2026.10.19` managed bridge and six desktop native RIDs
   (Windows/macOS/Linux × x64/arm64), shipped with the plugin; SDK/Avalonia/MicroCom.Runtime are not copied.
@@ -820,8 +822,18 @@ forwarding endpoint while TLS/NLA verifies the real `Tunnel.TargetHost` identity
 - Credentials are kept only as a minimal in-memory session copy for this connection and explicit reconnection, not as the whole
   password-bearing request, and never in ordinary Storage, logs, environment variables or UI models. Controllable buffers are cleared
   on disposal, but immutable managed strings and third-party native copies cannot be guaranteed to be reliably erased.
-- The first version does not include clipboard, audio, drive/printer redirection, RD Gateway, RemoteApp, multiple monitors,
-  dynamic remote resolution or IME/Unicode input. Local scaling does not resize the remote desktop. Host/OS-reserved shortcuts
+- The first version does not include audio, printer redirection, RD Gateway, RemoteApp, multiple monitors, dynamic remote resolution or IME/Unicode input; text clipboard and drive redirection now have a Windows x64 test path but still need real remote acceptance.
+  Redirection is disabled by default. Drives accept only full logical roots such as `D:\`, are read-only by default, and reject folders, UNC paths and dynamic hotplug.
+  Text is exchanged only while the remote desktop has focus; Ctrl+V waits for the local format-list acknowledgement, and focus loss, window deactivation, disconnect and stale callbacks are isolated. Image/file clipboard is unsupported.
+  On 2026-10-29 an independent MS-RDPECLIP Unicode text codec and transport-independent state machine were added
+  (text payload ≤2 MiB, control/format lists ≤64 KiB, at most 1024 formats and 12 outbound FIFO messages). The state waits for server MONITOR_READY,
+  supports legacy short names, coalesces advertisements behind ACKs, drains superseded wire responses before another request, faults on overflow, and wipes queued data on disable.
+  Text is encoded directly into the final packet without a second full-size payload. All 152 managed regression cases pass
+  (excluding manual performance cases), including settings, codec/state, native ABI, focus-loss and repeated-text Ctrl+V tests. The native static-channel suite passes 10/10, including the 16 MiB reassembly bound. A strict non-incremental managed build has no warnings/errors.
+  The fixed IronRDP commit `1f69e124e6bf85608efce3495c12eaf5f6b5a95d` can be rebuilt in a new temporary directory with `native/Build-Native.ps1`; upstream retains one `unfulfilled_lint_expectations` warning.
+  The managed bridge still comes from official NuGet. `native/artifacts` is not committed; without the extension the original library is copied and enabling redirection fails explicitly. The other five RIDs still use unmodified NuGet libraries and do not support these new extensions.
+  The local Release test library SHA-256 is `100EC7E145C4CEFD77D5311B972248BC5C28D351954B751EFDB2DADABBBA8B64`; this does not establish real remote login, drive I/O or clipboard interoperability.
+  Local scaling does not resize the remote desktop. Host/OS-reserved shortcuts
   take precedence (including host defaults such as Ctrl+N/W/Tab); rebind/unbind host shortcuts in Settings if needed. Send Ctrl+Alt+Del
   with the button; do not assume every combination is captured. Locale changes reuse the provider and update already-open documents.
 - The user has confirmed that the initial certificate trust dialog appears while debugging; this does not establish successful
