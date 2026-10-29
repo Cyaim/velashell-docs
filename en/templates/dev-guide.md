@@ -732,8 +732,8 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 - **The "Test" button takes the plugin's own path**: the plugin's handshake is not SSH, and the host will not throw SSH at your port. It
   branches by declaration — the workspace shape really opens once with `OpenAsync` and immediately calls `DisposeAsync` (building and
   tearing down the tunnel with it), the file-system shape opens a session and closes it. So `OpenAsync` **must be callable repeatedly,
-  disposable without a view and free of local resource leaks**. A real handshake may change remote state (for example, RDP creates or
-  attaches a login session); do not promise no remote side effects. The message of an exception appears verbatim in the dialog, so write
+  disposable without a view and free of local resource leaks**. A real handshake may change remote state; do not promise no remote side effects.
+  The message of an exception appears verbatim in the dialog, so write
   it so the user can fix the profile from it.
 - **Declarative SSH tunnels**: declare `WorkspaceFeatures.SshTunnel` on the connection type and give it a field of shape
   `ProtocolSettingKind.SshSession`, and the host builds the SSH session and the local port forward **before** opening the session, handing
@@ -781,70 +781,6 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 Complete example: [`plugins/VelaShell.Plugin.Redis`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Redis) (keyspace browser + type details + declarative connection form).
 Quickest start: `dotnet new velaplugin-workspace` (see §2.4; it comes with a field for going through an SSH tunnel — delete it by following
 the comments if you do not need it).
-
-#### 5.14.1 Embedded RDP desktop example and boundaries
-
-See the [RDP data exchange plan](../host/rdp-data-exchange-plan.md) for the clipboard, file-copy and drive-sharing roadmap and acceptance gates; planned capabilities are not claims about the current implementation.
-
-Release gates are wired: CI/release builds the Windows x64 extension with Rust 1.94.1 before managed tests, sets `VelaRequireRdpNativeExtension=true` to reject missing/incompatible extensions, and checks the final VPX's native DLL digest, ABI, exports, and asset layout. Ordinary development builds may leave the gate disabled. Local native rebuild and final-package verification results are recorded below; GitHub workflows have not run.
-
-Phase 1A managed fault isolation is merged: clipboard read failures/rejection cancel the paste, protocol synchronization timeout pauses clipboard until reconnect, and ordinary input remains usable; real transport failures still terminate the connection. Release checks additionally require `VelaClipboard_fault_isolation_version() == 1`, rejecting old ABI-1-only DLLs. The final strict managed rebuild has zero warnings/errors; 163 offline tests pass with the positive final-VPX check included. Rust static tests pass 2/2 and the new DLL SHA-256 is `FD3EA8A24328DC0075CCAC2F37DE22AF64A4071D47D98CBD3A0741EA5BCC5BAF`. GitHub workflows and real remote sessions remain unrun.
-
-The first-party [`VelaShell.Plugin.Rdp`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Rdp)
-registers `velashell.rdp` (`inProcess` / `onWorkspace:velashell.rdp`, port 3389 by default).
-Select RDP in the connection profile and reuse the host's endpoint and username/password fields. Set `domain` separately or use
-`DOMAIN\user`; UPN (`user@domain`) requires an empty domain. For local accounts use the Windows computer name;
-`.` domain interoperability is not verified, and an FQDN is not guessed into a NetBIOS name.
-Advanced fields are initial width/height (1280×720 by default; width 320–7680, height 200–4320), local scaling (fit/1:1), and
-connect timeout (1000–120000ms, default 15000ms). `jumpSession` reuses the host SSH tunnel above: transport connects to the local
-forwarding endpoint while TLS/NLA verifies the real `Tunnel.TargetHost` identity.
-Additional advanced settings are `redirectClipboard=false`, `redirectDrives=""` (for example `D:\;E:\`) and `drivesReadOnly=true`.
-Enabling these authorizes text exchange or access to the entire selected logical volume, not just a directory.
-
-- Depends on the official NuGet `Devolutions.IronRdp 2026.10.19` managed bridge and six desktop native RIDs
-  (Windows/macOS/Linux × x64/arm64), shipped with the plugin; SDK/Avalonia/MicroCom.Runtime are not copied.
-  `Licenses/` preserves MIT/Apache texts and the third-party NOTICE from the corresponding official commit, with a source record
-  delimiting the checked scope; this is not a claim of an exhaustive legal audit of statically linked Rust dependencies.
-- Uses TLS + NLA/CredSSP only: no plaintext legacy RDP, silent security downgrade, or automatic server redirection.
-  NLA currently supports password-based NTLM only; domain/UPN syntax does not imply Kerberos, SSO or smart-card support.
-  The plugin runs in-process: third-party native decoder failures and internal memory peaks are not fully constrained by
-  managed budgets, and crash isolation is not provided.
-  Valid system certificate verification is accepted without a pin; an explicit pin must match SHA-256, and a changed certificate
-  requires confirmation again. Initial open uses the host trust prompt; tab reconnection does not provide that prompt, so close
-  and reopen the saved profile to verify it. The plugin never silently updates the pin.
-- `OpenAsync` completes desktop activation before returning; Open→Dispose does not require creating an Avalonia view.
-  "Test" really logs in and disconnects, potentially creating/attaching a remote Windows session. Disconnect is not logoff and
-  cannot guarantee no remote side effects. Explicit disconnect/reconnect, close, deactivation and host shutdown must cancel and
-  clean up; old-generation frames/events must not update a new session.
-  Natural pump termination also releases the decoder, stream and managed double buffers without waiting for the faulted tab to close;
-  the UI retains only its last successfully displayed bitmap.
-- The UI copies directly into a locked bitmap under a synchronous frame lease, without another full-frame staging array;
-  target dimensions, stride and capacity are validated before writing. Pixel-only updates do not refresh the toolbar or request layout.
-  Without a created/attached view, protocol decoding continues but managed snapshots are skipped; reattaching requests the latest complete image.
-  Snapshots coalesce at finite processing-turn boundaries, control wakeups do not occupy the input queue, and continuously ready network/input work alternates fairly.
-  Native→managed and managed→bitmap copies remain: this is not zero-copy. The current binding does not enable modern bitmap codecs / RDPGFX;
-  host GPU composition does not imply RDP video hardware decoding. The frame-size limit is not a process-wide or multi-session memory cap.
-  Synthetic copy throughput and publication sequence numbers are not screen FPS; stable 60/120 FPS still requires end-to-end validation.
-- Credentials are kept only as a minimal in-memory session copy for this connection and explicit reconnection, not as the whole
-  password-bearing request, and never in ordinary Storage, logs, environment variables or UI models. Controllable buffers are cleared
-  on disposal, but immutable managed strings and third-party native copies cannot be guaranteed to be reliably erased.
-- The first version does not include audio, printer redirection, RD Gateway, RemoteApp, multiple monitors, dynamic remote resolution or IME/Unicode input; text clipboard and drive redirection now have a Windows x64 test path but still need real remote acceptance.
-  Redirection is disabled by default. Drives accept only full logical roots such as `D:\`, are read-only by default, and reject folders, UNC paths and dynamic hotplug.
-  Text is exchanged only while the remote desktop has focus; Ctrl+V waits for the local format-list acknowledgement, and focus loss, window deactivation, disconnect and stale callbacks are isolated. Image/file clipboard is unsupported.
-  On 2026-10-29 an independent MS-RDPECLIP Unicode text codec and transport-independent state machine were added
-  (text payload ≤2 MiB, control/format lists ≤64 KiB, at most 1024 formats and 12 outbound FIFO messages). The state waits for server MONITOR_READY,
-  supports legacy short names, coalesces advertisements behind ACKs, drains superseded wire responses before another request, faults on overflow, and wipes queued data on disable.
-  Text is encoded directly into the final packet without a second full-size payload. All 152 managed regression cases pass
-  (excluding manual performance cases), including settings, codec/state, native ABI, focus-loss and repeated-text Ctrl+V tests. The native static-channel suite passes 10/10, including the 16 MiB reassembly bound. A strict non-incremental managed build has no warnings/errors.
-  The fixed IronRDP commit `1f69e124e6bf85608efce3495c12eaf5f6b5a95d` can be rebuilt in a new temporary directory with `native/Build-Native.ps1`; upstream retains one `unfulfilled_lint_expectations` warning.
-  The managed bridge still comes from official NuGet. `native/artifacts` is not committed; without the extension the original library is copied and enabling redirection fails explicitly. The other five RIDs still use unmodified NuGet libraries and do not support these new extensions.
-  The local Release test library SHA-256 is `100EC7E145C4CEFD77D5311B972248BC5C28D351954B751EFDB2DADABBBA8B64`; this does not establish real remote login, drive I/O or clipboard interoperability.
-  Local scaling does not resize the remote desktop. Host/OS-reserved shortcuts
-  take precedence (including host defaults such as Ctrl+N/W/Tab); rebind/unbind host shortcuts in Settings if needed. Send Ctrl+Alt+Del
-  with the button; do not assume every combination is captured. Locale changes reuse the provider and update already-open documents.
-- The user has confirmed that the initial certificate trust dialog appears while debugging; this does not establish successful
-  login or end-to-end desktop interoperability. Real Windows login, display/input and network-loss/reconnect, plus macOS/Linux
-  and arm64 execution, remain unverified. Six RID files in a package are asset checks, not evidence of successful execution on those platforms.
 
 ## 6. Isolated Process Mode (`isolated`)
 
