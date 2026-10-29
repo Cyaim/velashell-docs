@@ -950,6 +950,12 @@ internal sealed class MyWorkspaceProvider(IPluginContext context) : IWorkspacePr
 
 #### 5.14.1 RDP 内嵌桌面实例与边界
 
+剪贴板、文件复制与磁盘共享的后续路线及验收门禁见 [RDP 数据交换设计与实施计划](../host/RDP数据交换设计与实施计划.md)；计划中的能力不代表当前版本已实现。
+
+发布门禁已接入：CI/release 在托管测试前以 Rust 1.94.1 构建 Windows x64 扩展，启用 `VelaRequireRdpNativeExtension=true` 拒绝缺失/不兼容扩展，打包后验证最终 VPX 的原生 DLL 摘要、ABI、导出和资产布局。普通开发构建仍允许不启用门禁。原生重建与最终包的本地验证结果见下文，GitHub 工作流尚未运行。
+
+阶段一 A 托管故障隔离已合入：剪贴板读取/拒绝取消本次粘贴，协议同步超时暂停该能力至重连，普通输入仍可用；真正传输故障仍终止连接。发布检查已进一步要求 `VelaClipboard_fault_isolation_version() == 1`，仅 ABI=1 的旧 DLL 被拒绝。最终严格托管构建零警告/错误，163 项离线测试全部通过、包含最终 VPX 正向验证；Rust 静态测试 2/2 通过，新 DLL SHA-256 为 `FD3EA8A24328DC0075CCAC2F37DE22AF64A4071D47D98CBD3A0741EA5BCC5BAF`。GitHub 工作流和真实远端尚未运行。
+
 第一方 [`VelaShell.Plugin.Rdp`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Rdp)
 注册 `velashell.rdp`（`inProcess` / `onWorkspace:velashell.rdp`，默认 3389）。
 在连接配置选择 RDP，复用宿主主机、端口和账号密码字段；`domain` 可单独填写，或使用 `DOMAIN\user`，

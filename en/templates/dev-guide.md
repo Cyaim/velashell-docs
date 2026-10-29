@@ -784,6 +784,12 @@ the comments if you do not need it).
 
 #### 5.14.1 Embedded RDP desktop example and boundaries
 
+See the [RDP data exchange plan](../host/rdp-data-exchange-plan.md) for the clipboard, file-copy and drive-sharing roadmap and acceptance gates; planned capabilities are not claims about the current implementation.
+
+Release gates are wired: CI/release builds the Windows x64 extension with Rust 1.94.1 before managed tests, sets `VelaRequireRdpNativeExtension=true` to reject missing/incompatible extensions, and checks the final VPX's native DLL digest, ABI, exports, and asset layout. Ordinary development builds may leave the gate disabled. Local native rebuild and final-package verification results are recorded below; GitHub workflows have not run.
+
+Phase 1A managed fault isolation is merged: clipboard read failures/rejection cancel the paste, protocol synchronization timeout pauses clipboard until reconnect, and ordinary input remains usable; real transport failures still terminate the connection. Release checks additionally require `VelaClipboard_fault_isolation_version() == 1`, rejecting old ABI-1-only DLLs. The final strict managed rebuild has zero warnings/errors; 163 offline tests pass with the positive final-VPX check included. Rust static tests pass 2/2 and the new DLL SHA-256 is `FD3EA8A24328DC0075CCAC2F37DE22AF64A4071D47D98CBD3A0741EA5BCC5BAF`. GitHub workflows and real remote sessions remain unrun.
+
 The first-party [`VelaShell.Plugin.Rdp`](https://github.com/VelaShellLabs/velashell-plugins/tree/main/plugins/VelaShell.Plugin.Rdp)
 registers `velashell.rdp` (`inProcess` / `onWorkspace:velashell.rdp`, port 3389 by default).
 Select RDP in the connection profile and reuse the host's endpoint and username/password fields. Set `domain` separately or use
